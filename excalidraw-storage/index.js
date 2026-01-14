@@ -7,6 +7,12 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3003;
 
+// Cleanup configuration (in days)
+const ROOM_MAX_AGE_DAYS = parseInt(process.env.ROOM_MAX_AGE_DAYS || '30', 10);
+const EXPORT_MAX_AGE_DAYS = parseInt(process.env.EXPORT_MAX_AGE_DAYS || '30', 10);
+const DRAWING_MAX_AGE_DAYS = parseInt(process.env.DRAWING_MAX_AGE_DAYS || '90', 10);
+const CLEANUP_INTERVAL_HOURS = parseInt(process.env.CLEANUP_INTERVAL_HOURS || '24', 10);
+
 // Initialize SQLite database
 const dbPath = process.env.DB_PATH || path.join(__dirname, 'data', 'excalidraw.db');
 const db = new Database(dbPath);
@@ -53,7 +59,51 @@ db.exec(`
   )
 `);
 
+// ============================================
+// Auto-cleanup of old data
+// ============================================
+
+const runCleanup = () => {
+  const now = Math.floor(Date.now() / 1000);
+  
+  try {
+    // Delete old rooms
+    const roomCutoff = now - (ROOM_MAX_AGE_DAYS * 24 * 60 * 60);
+    const roomResult = db.prepare('DELETE FROM rooms WHERE updated_at < ?').run(roomCutoff);
+    
+    // Delete orphaned files (files whose room was deleted)
+    const orphanedFiles = db.prepare(`
+      DELETE FROM files WHERE room_id IS NOT NULL 
+      AND room_id NOT IN (SELECT id FROM rooms)
+    `).run();
+    
+    // Delete old exports
+    const exportCutoff = now - (EXPORT_MAX_AGE_DAYS * 24 * 60 * 60);
+    const exportResult = db.prepare('DELETE FROM exports WHERE created_at < ?').run(exportCutoff);
+    
+    // Delete old drawings (shareable links)
+    const drawingCutoff = now - (DRAWING_MAX_AGE_DAYS * 24 * 60 * 60);
+    const drawingResult = db.prepare('DELETE FROM drawings WHERE updated_at < ?').run(drawingCutoff);
+    
+    console.log(`Cleanup completed: ${roomResult.changes} rooms, ${orphanedFiles.changes} orphaned files, ${exportResult.changes} exports, ${drawingResult.changes} drawings deleted`);
+    
+    // Vacuum the database to reclaim space
+    db.exec('VACUUM');
+  } catch (error) {
+    console.error('Cleanup error:', error);
+  }
+};
+
+// Run cleanup on startup
+runCleanup();
+
+// Schedule periodic cleanup
+setInterval(runCleanup, CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000);
+
+// ============================================
 // Middleware
+// ============================================
+
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
   methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
@@ -64,11 +114,20 @@ app.use(express.raw({ limit: '50mb', type: 'application/octet-stream' }));
 
 // Health check
 app.get('/', (req, res) => {
-  res.send('Excalidraw storage server is up :)');
+  res.json({
+    status: 'ok',
+    message: 'Excalidraw storage server is up',
+    cleanup: {
+      roomMaxAgeDays: ROOM_MAX_AGE_DAYS,
+      exportMaxAgeDays: EXPORT_MAX_AGE_DAYS,
+      drawingMaxAgeDays: DRAWING_MAX_AGE_DAYS,
+      intervalHours: CLEANUP_INTERVAL_HOURS
+    }
+  });
 });
 
 // ============================================
-// Shareable Links API (existing)
+// Shareable Links API
 // ============================================
 
 // Get drawing by ID
@@ -150,7 +209,7 @@ app.post('/api/v2/exports/:id', (req, res) => {
 });
 
 // ============================================
-// Rooms API (for collaboration - replaces Firebase)
+// Rooms API (for collaboration)
 // ============================================
 
 // Get room scene data
@@ -203,7 +262,7 @@ app.post('/api/v2/rooms/:roomId', (req, res) => {
 });
 
 // ============================================
-// Files API (for room assets - replaces Firebase Storage)
+// Files API (for room assets)
 // ============================================
 
 // Get file - supports multiple path segments
@@ -249,4 +308,5 @@ app.post('/api/v2/files/*', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Excalidraw storage server listening on port ${PORT}`);
   console.log(`Database: ${dbPath}`);
+  console.log(`Cleanup: rooms ${ROOM_MAX_AGE_DAYS}d, exports ${EXPORT_MAX_AGE_DAYS}d, drawings ${DRAWING_MAX_AGE_DAYS}d, interval ${CLEANUP_INTERVAL_HOURS}h`);
 });

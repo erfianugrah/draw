@@ -1,16 +1,19 @@
 # Excalidraw Self-Hosted
 
-A fully self-contained, self-hosted [Excalidraw](https://excalidraw.com) deployment with real-time collaboration and persistent storage.
+A fully self-contained, self-hosted [Excalidraw](https://excalidraw.com) deployment with real-time collaboration and persistent storage. Replaces Firebase entirely with a custom SQLite backend.
 
 ## Features
 
 - **Real-time collaboration** - Multiple users can draw together with live cursors
-- **Persistent storage** - Drawings saved to SQLite database (shareable links work)
-- **Auto-HTTPS** - Caddy handles SSL certificates automatically via Cloudflare DNS-01
+- **End-to-end encryption** - Server only stores encrypted blobs; keys stay in URLs
+- **Persistent storage** - Drawings, rooms, and exports saved to SQLite database
+- **Shareable links** - Full support for sharing drawings with encryption
+- **Auto-cleanup** - Configurable retention policies for rooms, exports, and drawings
+- **Auto-HTTPS** - Caddy handles SSL certificates via Cloudflare DNS-01
 - **Single domain** - Everything runs on one domain, only ports 80/443 exposed
-- **Docker-based** - Easy deployment with Docker Compose
-- **Minimal footprint** - Only 3 containers (Caddy serves static files directly)
+- **Docker-based** - Easy deployment with Docker Compose (3 containers)
 - **ARM64 compatible** - Works on Raspberry Pi 5 and other ARM devices
+- **No Firebase** - Completely self-hosted, no external dependencies
 
 ## Architecture
 
@@ -36,6 +39,39 @@ A fully self-contained, self-hosted [Excalidraw](https://excalidraw.com) deploym
 ```
 
 **Only ports 80 and 443 are exposed.** Caddy serves static files directly and proxies API/WebSocket requests internally.
+
+### How Encryption Works
+
+Excalidraw uses **client-side end-to-end encryption**. When you share a drawing:
+
+1. Your browser generates a random encryption key
+2. Drawing data is encrypted with this key before sending to the server
+3. The key is stored in the URL fragment (after `#`) - **never sent to the server**
+4. Recipients decrypt locally using the key from the URL
+
+```
+https://draw.example.com/#room=abc123,encryptionKey=xyz789
+                              │                    │
+                              ▼                    ▼
+                      Sent to server     Stays in browser
+                      (room lookup)      (decryption key)
+```
+
+**The server only sees encrypted blobs** - it cannot read your drawings.
+
+### Deployment Options
+
+**Option A: Direct exposure (ports 80/443)**
+```
+Internet → Your Server:80/443 → Caddy → Services
+```
+
+**Option B: Behind Cloudflare Tunnel (recommended)**
+```
+Internet → Cloudflare → Tunnel → Caddy (172.41.1.2) → Services
+```
+
+For Cloudflare Tunnel, the containers use static IPs on a dedicated subnet (172.41.1.0/24) for reliable routing.
 
 ## Prerequisites
 
@@ -102,12 +138,25 @@ Caddy will automatically obtain SSL certificates via Cloudflare DNS-01 challenge
 
 ### Environment Variables
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `DOMAIN` | Your domain (used by Caddy) | `draw.example.com` |
-| `BASE_URL` | Full URL with protocol | `https://draw.example.com` |
-| `CF_API_TOKEN` | Cloudflare API token | `abc123...` |
-| `EMAIL` | Email for Let's Encrypt | `you@example.com` |
+| Variable | Description | Default | Example |
+|----------|-------------|---------|---------|
+| `DOMAIN` | Your domain (used by Caddy) | *required* | `draw.example.com` |
+| `BASE_URL` | Full URL with protocol | *required* | `https://draw.example.com` |
+| `CF_API_TOKEN` | Cloudflare API token for DNS-01 | *required* | `abc123...` |
+| `EMAIL` | Email for Let's Encrypt | *required* | `you@example.com` |
+| `TZ` | Timezone for logs/cleanup | `UTC` | `Europe/Amsterdam` |
+| `ROOM_MAX_AGE_DAYS` | Days to keep collaboration rooms | `30` | `7` |
+| `EXPORT_MAX_AGE_DAYS` | Days to keep shared exports | `30` | `14` |
+| `DRAWING_MAX_AGE_DAYS` | Days to keep saved drawings | `90` | `365` |
+| `CLEANUP_INTERVAL_HOURS` | How often to run cleanup | `24` | `12` |
+
+### Auto-Cleanup
+
+The storage service automatically removes old data based on the retention settings above. Cleanup runs:
+- On startup
+- Every `CLEANUP_INTERVAL_HOURS` hours
+
+Set any `*_MAX_AGE_DAYS` to `0` to disable cleanup for that data type.
 
 ### Customizing Excalidraw
 
@@ -187,6 +236,8 @@ docker compose build --no-cache caddy excalidraw-room
 docker compose up -d
 ```
 
+**Note:** This project patches Excalidraw to replace Firebase with the self-hosted backend. If Excalidraw makes significant changes to `excalidraw-app/data/firebase.ts` or `excalidraw-app/components/ExportToExcalidrawPlus.tsx`, the patches in `patches/` may need updating.
+
 ## Troubleshooting
 
 ### SSL Certificate Issues
@@ -239,11 +290,58 @@ draw/
 │   └── Dockerfile            # Caddy + Cloudflare + Excalidraw build
 ├── excalidraw-room/
 │   └── Dockerfile            # Collaboration server
-└── excalidraw-storage/
-    ├── Dockerfile            # Storage API
-    ├── index.js              # Express + SQLite
-    └── package.json
+├── excalidraw-storage/
+│   ├── Dockerfile            # Storage API
+│   ├── index.js              # Express + SQLite + auto-cleanup
+│   └── package.json
+└── patches/
+    ├── firebase.ts           # Replaces Firebase with self-hosted API
+    └── ExportToExcalidrawPlus.tsx  # Local share instead of Excalidraw+
 ```
+
+### API Endpoints
+
+The storage service exposes:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v2/post/` | POST | Save a drawing (returns ID) |
+| `/api/v2/:id` | GET | Retrieve a drawing |
+| `/api/v2/rooms/:roomId` | GET/PUT | Room state for collaboration |
+| `/api/v2-files/:id` | GET/PUT | File/asset storage |
+
+### Database Schema
+
+SQLite stores three tables:
+- **drawings** - Shared drawings (from "Share" link)
+- **rooms** - Collaboration room state
+- **files** - Binary assets (images, etc.)
+
+## Cloudflare Tunnel Setup (Optional)
+
+If you're running behind a Cloudflare Tunnel instead of exposing ports directly:
+
+1. Create a tunnel in Cloudflare Zero Trust dashboard
+2. Configure the tunnel to route to Caddy's static IP:
+   ```yaml
+   # In your tunnel config
+   ingress:
+     - hostname: draw.yourdomain.com
+       service: https://172.41.1.2:443
+       originRequest:
+         noTLSVerify: true
+   ```
+3. The docker-compose.yml already assigns static IPs:
+   - `172.41.1.2` - Caddy
+   - `172.41.1.3` - excalidraw-room
+   - `172.41.1.4` - excalidraw-storage
+
+## Security Notes
+
+- **Encryption keys never leave the browser** - The server cannot decrypt drawings
+- **No authentication built-in** - Consider adding Cloudflare Access or a reverse proxy auth
+- **SQLite file permissions** - The data volume contains all user data; secure accordingly
+- **HTTPS required** - Encryption keys in URLs are only safe over HTTPS
 
 ## License
 

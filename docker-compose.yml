@@ -56,6 +56,11 @@ services:
       - PORT=3003
       - CORS_ORIGIN=*
       - TZ=${TZ:-Europe/Amsterdam}
+      # Auto-cleanup settings (in days)
+      - ROOM_MAX_AGE_DAYS=${ROOM_MAX_AGE_DAYS:-30}
+      - EXPORT_MAX_AGE_DAYS=${EXPORT_MAX_AGE_DAYS:-30}
+      - DRAWING_MAX_AGE_DAYS=${DRAWING_MAX_AGE_DAYS:-90}
+      - CLEANUP_INTERVAL_HOURS=${CLEANUP_INTERVAL_HOURS:-24}
     volumes:
       - excalidraw-data:/app/data
     networks:
