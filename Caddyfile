@@ -20,7 +20,6 @@
     # Static files - Excalidraw frontend
     handle {
         root * /srv
-        encode gzip
         try_files {path} /index.html
         file_server
     }
