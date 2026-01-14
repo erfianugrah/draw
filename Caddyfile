@@ -7,6 +7,20 @@
         dns cloudflare {$CF_API_TOKEN}
     }
 
+    # Security headers
+    header {
+        # Prevent clickjacking
+        X-Frame-Options "SAMEORIGIN"
+        # Prevent MIME type sniffing
+        X-Content-Type-Options "nosniff"
+        # XSS protection
+        X-XSS-Protection "1; mode=block"
+        # Referrer policy - don't leak URLs with encryption keys
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Remove server header
+        -Server
+    }
+
     # Storage API
     handle_path /api/* {
         reverse_proxy excalidraw-storage:3003

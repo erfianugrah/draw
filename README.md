@@ -14,6 +14,7 @@ A fully self-contained, self-hosted [Excalidraw](https://excalidraw.com) deploym
 - **Docker-based** - Easy deployment with Docker Compose (3 containers)
 - **ARM64 compatible** - Works on Raspberry Pi 5 and other ARM devices
 - **No Firebase** - Completely self-hosted, no external dependencies
+- **Privacy-first** - No analytics, no external CDN requests, no tracking
 
 ## Architecture
 
@@ -296,7 +297,8 @@ draw/
 │   └── package.json
 └── patches/
     ├── firebase.ts           # Replaces Firebase with self-hosted API
-    └── ExportToExcalidrawPlus.tsx  # Local share instead of Excalidraw+
+    ├── ExportToExcalidrawPlus.tsx  # Local share instead of Excalidraw+
+    └── index.html            # Removes analytics and external CDN
 ```
 
 ### API Endpoints
@@ -305,17 +307,20 @@ The storage service exposes:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/api/v2/` | GET | Health check with cleanup config |
 | `/api/v2/post/` | POST | Save a drawing (returns ID) |
 | `/api/v2/:id` | GET | Retrieve a drawing |
-| `/api/v2/rooms/:roomId` | GET/PUT | Room state for collaboration |
-| `/api/v2-files/:id` | GET/PUT | File/asset storage |
+| `/api/v2/rooms/:roomId` | GET/POST | Room state for collaboration |
+| `/api/v2/files/*` | GET/POST | File/asset storage |
+| `/api/v2/exports/:id` | GET/POST | Shareable export storage |
 
 ### Database Schema
 
-SQLite stores three tables:
+SQLite stores four tables:
 - **drawings** - Shared drawings (from "Share" link)
-- **rooms** - Collaboration room state
+- **rooms** - Collaboration room state (encrypted)
 - **files** - Binary assets (images, etc.)
+- **exports** - Shareable exports
 
 ## Cloudflare Tunnel Setup (Optional)
 
@@ -336,12 +341,25 @@ If you're running behind a Cloudflare Tunnel instead of exposing ports directly:
    - `172.41.1.3` - excalidraw-room
    - `172.41.1.4` - excalidraw-storage
 
+## Privacy
+
+This deployment makes **zero external requests**:
+
+- **No analytics** - Simple Analytics script removed
+- **No external fonts** - All fonts bundled locally (Excalifont, Assistant, etc.)
+- **No CDN dependencies** - Everything served from your server
+- **No tracking** - `VITE_APP_DISABLE_TRACKING=true` by default
+
+Your drawings stay on your server. The only network traffic is between your users and your server.
+
 ## Security Notes
 
 - **Encryption keys never leave the browser** - The server cannot decrypt drawings
 - **No authentication built-in** - Consider adding Cloudflare Access or a reverse proxy auth
 - **SQLite file permissions** - The data volume contains all user data; secure accordingly
 - **HTTPS required** - Encryption keys in URLs are only safe over HTTPS
+- **Security headers** - Caddy adds X-Frame-Options, X-Content-Type-Options, etc.
+- **Referrer-Policy** - Set to prevent leaking URLs containing encryption keys
 
 ## License
 
