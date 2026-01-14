@@ -16,8 +16,9 @@ WORKDIR /app
 # Clone excalidraw at specific version
 RUN git clone --depth 1 --branch ${EXCALIDRAW_VERSION} https://github.com/excalidraw/excalidraw.git .
 
-# Copy our custom firebase.ts replacement (uses self-hosted storage instead of Firebase)
+# Copy our patches (replaces Firebase with self-hosted storage)
 COPY patches/firebase.ts /app/excalidraw-app/data/firebase.ts
+COPY patches/ExportToExcalidrawPlus.tsx /app/excalidraw-app/components/ExportToExcalidrawPlus.tsx
 
 # Install dependencies
 RUN yarn install --network-timeout 600000

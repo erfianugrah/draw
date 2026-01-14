@@ -26,13 +26,17 @@ import type { Socket } from "socket.io-client";
 import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
 
 // Use our self-hosted storage API
-const STORAGE_API = import.meta.env.VITE_APP_BACKEND_V2_GET_URL?.replace('/api/v2/', '') || '';
+const STORAGE_API =
+  import.meta.env.VITE_APP_BACKEND_V2_GET_URL?.replace("/api/v2/", "") || "";
 
 // Scene version cache
 class SceneVersionCache {
   private static cache = new WeakMap<Socket, number>();
   static get = (socket: Socket) => SceneVersionCache.cache.get(socket);
-  static set = (socket: Socket, elements: readonly SyncableExcalidrawElement[]) => {
+  static set = (
+    socket: Socket,
+    elements: readonly SyncableExcalidrawElement[],
+  ) => {
     SceneVersionCache.cache.set(socket, getSceneVersion(elements));
   };
 }
@@ -64,7 +68,9 @@ const decryptElements = async (
   roomKey: string,
 ): Promise<readonly ExcalidrawElement[]> => {
   const decrypted = await decryptData(iv, ciphertext, roomKey);
-  const decodedData = new TextDecoder("utf-8").decode(new Uint8Array(decrypted));
+  const decodedData = new TextDecoder("utf-8").decode(
+    new Uint8Array(decrypted),
+  );
   return JSON.parse(decodedData);
 };
 
@@ -81,11 +87,14 @@ export const saveFilesToFirebase = async ({
   await Promise.all(
     files.map(async ({ id, buffer }) => {
       try {
-        const response = await fetch(`${STORAGE_API}/api/v2/files/${prefix}/${id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: buffer,
-        });
+        const response = await fetch(
+          `${STORAGE_API}/api/v2/files/${prefix}/${id}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/octet-stream" },
+            body: buffer,
+          },
+        );
         if (response.ok) {
           savedFiles.push(id);
         } else {
@@ -112,16 +121,25 @@ export const saveToFirebase = async (
 
   try {
     // Get existing room data
-    const existingResponse = await fetch(`${STORAGE_API}/api/v2/rooms/${roomId}`);
+    const existingResponse = await fetch(
+      `${STORAGE_API}/api/v2/rooms/${roomId}`,
+    );
     let reconciledElements = elements;
 
     if (existingResponse.ok) {
       const existingData = await existingResponse.json();
       if (existingData.ciphertext && existingData.iv) {
-        const iv = Uint8Array.from(atob(existingData.iv), c => c.charCodeAt(0));
-        const ciphertext = Uint8Array.from(atob(existingData.ciphertext), c => c.charCodeAt(0));
+        const iv = Uint8Array.from(atob(existingData.iv), (c) =>
+          c.charCodeAt(0),
+        );
+        const ciphertext = Uint8Array.from(atob(existingData.ciphertext), (c) =>
+          c.charCodeAt(0),
+        );
         const prevElements = getSyncableElements(
-          restoreElements(await decryptElements(iv, ciphertext, roomKey), null),
+          restoreElements(
+            await decryptElements(iv, ciphertext, roomKey),
+            null,
+          ),
         );
         reconciledElements = getSyncableElements(
           reconcileElements(
@@ -134,12 +152,15 @@ export const saveToFirebase = async (
     }
 
     // Encrypt and save
-    const { ciphertext, iv } = await encryptElements(roomKey, reconciledElements);
+    const { ciphertext, iv } = await encryptElements(
+      roomKey,
+      reconciledElements,
+    );
     const sceneVersion = getSceneVersion(reconciledElements);
 
     const response = await fetch(`${STORAGE_API}/api/v2/rooms/${roomId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sceneVersion,
         iv: btoa(String.fromCharCode(...iv)),
@@ -148,13 +169,13 @@ export const saveToFirebase = async (
     });
 
     if (!response.ok) {
-      throw new Error('Failed to save room');
+      throw new Error("Failed to save room");
     }
 
     SceneVersionCache.set(socket, reconciledElements);
     return reconciledElements;
   } catch (error) {
-    console.error('Error saving to storage:', error);
+    console.error("Error saving to storage:", error);
     return null;
   }
 };
@@ -175,8 +196,10 @@ export const loadFromFirebase = async (
       return null;
     }
 
-    const iv = Uint8Array.from(atob(data.iv), c => c.charCodeAt(0));
-    const ciphertext = Uint8Array.from(atob(data.ciphertext), c => c.charCodeAt(0));
+    const iv = Uint8Array.from(atob(data.iv), (c) => c.charCodeAt(0));
+    const ciphertext = Uint8Array.from(atob(data.ciphertext), (c) =>
+      c.charCodeAt(0),
+    );
     const elements = getSyncableElements(
       restoreElements(await decryptElements(iv, ciphertext, roomKey), null),
     );
@@ -187,7 +210,7 @@ export const loadFromFirebase = async (
 
     return elements;
   } catch (error) {
-    console.error('Error loading from storage:', error);
+    console.error("Error loading from storage:", error);
     return null;
   }
 };
@@ -203,7 +226,9 @@ export const loadFilesFromFirebase = async (
   await Promise.all(
     [...new Set(filesIds)].map(async (id) => {
       try {
-        const response = await fetch(`${STORAGE_API}/api/v2/files/${prefix}/${id}`);
+        const response = await fetch(
+          `${STORAGE_API}/api/v2/files/${prefix}/${id}`,
+        );
         if (response.ok) {
           const arrayBuffer = await response.arrayBuffer();
           const { data, metadata } = await decompressData<BinaryFileMetadata>(
@@ -233,7 +258,14 @@ export const loadFilesFromFirebase = async (
   return { loadedFiles, erroredFiles };
 };
 
-// Stub for compatibility
+// Mock Firebase Storage for ExportToExcalidrawPlus compatibility
+// This feature exports to Excalidraw's cloud service which we don't use
+const mockStorage = {
+  app: { name: "mock" },
+  maxUploadRetryTime: 0,
+  maxOperationRetryTime: 0,
+} as any;
+
 export const loadFirebaseStorage = async () => {
-  return null;
+  return mockStorage;
 };
