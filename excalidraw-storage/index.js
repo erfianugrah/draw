@@ -15,9 +15,32 @@ const db = new Database(dbPath);
 db.exec(`
   CREATE TABLE IF NOT EXISTS drawings (
     id TEXT PRIMARY KEY,
-    data TEXT NOT NULL,
+    data BLOB NOT NULL,
     created_at INTEGER DEFAULT (strftime('%s', 'now')),
     updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+  )
+`);
+
+// Rooms table for collaboration
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rooms (
+    id TEXT PRIMARY KEY,
+    scene_version INTEGER DEFAULT 0,
+    iv BLOB,
+    ciphertext BLOB,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+  )
+`);
+
+// Files table for room assets
+db.exec(`
+  CREATE TABLE IF NOT EXISTS files (
+    id TEXT PRIMARY KEY,
+    room_id TEXT,
+    data BLOB NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    FOREIGN KEY (room_id) REFERENCES rooms(id)
   )
 `);
 
@@ -28,15 +51,18 @@ app.use(cors({
   allowedHeaders: ['Content-Type']
 }));
 app.use(express.json({ limit: '50mb' }));
-app.use(express.text({ limit: '50mb' }));
+app.use(express.raw({ limit: '50mb', type: 'application/octet-stream' }));
 
 // Health check
 app.get('/', (req, res) => {
   res.send('Excalidraw storage server is up :)');
 });
 
-// Get drawing by ID - matches Excalidraw's expected API format
-// GET /api/v2/:id
+// ============================================
+// Shareable Links API (existing)
+// ============================================
+
+// Get drawing by ID
 app.get('/api/v2/:id', (req, res) => {
   try {
     const { id } = req.params;
@@ -48,24 +74,22 @@ app.get('/api/v2/:id', (req, res) => {
     }
     
     res.setHeader('Content-Type', 'application/octet-stream');
-    res.send(row.data);
+    res.send(Buffer.from(row.data));
   } catch (error) {
     console.error('Error getting drawing:', error);
     res.status(500).json({ error: 'Failed to get drawing' });
   }
 });
 
-// Save new drawing - matches Excalidraw's expected API format
-// POST /api/v2/post/
+// Save new drawing
 app.post('/api/v2/post/', (req, res) => {
   try {
     const id = nanoid(22);
-    const data = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    const data = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
     
     const stmt = db.prepare('INSERT INTO drawings (id, data) VALUES (?, ?)');
     stmt.run(id, data);
     
-    // Return the response format Excalidraw expects
     res.json({ id });
   } catch (error) {
     console.error('Error saving drawing:', error);
@@ -73,27 +97,103 @@ app.post('/api/v2/post/', (req, res) => {
   }
 });
 
-// Update existing drawing
-app.put('/api/v2/:id', (req, res) => {
+// ============================================
+// Rooms API (for collaboration - replaces Firebase)
+// ============================================
+
+// Get room scene data
+app.get('/api/v2/rooms/:roomId', (req, res) => {
   try {
-    const { id } = req.params;
-    const data = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    const { roomId } = req.params;
+    const stmt = db.prepare('SELECT scene_version, iv, ciphertext FROM rooms WHERE id = ?');
+    const row = stmt.get(roomId);
     
-    const stmt = db.prepare(`
-      UPDATE drawings 
-      SET data = ?, updated_at = strftime('%s', 'now')
-      WHERE id = ?
-    `);
-    const result = stmt.run(data, id);
-    
-    if (result.changes === 0) {
-      return res.status(404).json({ error: 'Drawing not found' });
+    if (!row) {
+      return res.status(404).json({ error: 'Room not found' });
     }
     
-    res.json({ id });
+    res.json({
+      sceneVersion: row.scene_version,
+      iv: row.iv ? Buffer.from(row.iv).toString('base64') : null,
+      ciphertext: row.ciphertext ? Buffer.from(row.ciphertext).toString('base64') : null
+    });
   } catch (error) {
-    console.error('Error updating drawing:', error);
-    res.status(500).json({ error: 'Failed to update drawing' });
+    console.error('Error getting room:', error);
+    res.status(500).json({ error: 'Failed to get room' });
+  }
+});
+
+// Save/update room scene data
+app.post('/api/v2/rooms/:roomId', (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { sceneVersion, iv, ciphertext } = req.body;
+    
+    const ivBuffer = iv ? Buffer.from(iv, 'base64') : null;
+    const ciphertextBuffer = ciphertext ? Buffer.from(ciphertext, 'base64') : null;
+    
+    const stmt = db.prepare(`
+      INSERT INTO rooms (id, scene_version, iv, ciphertext)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        scene_version = excluded.scene_version,
+        iv = excluded.iv,
+        ciphertext = excluded.ciphertext,
+        updated_at = strftime('%s', 'now')
+    `);
+    stmt.run(roomId, sceneVersion, ivBuffer, ciphertextBuffer);
+    
+    res.json({ success: true, roomId });
+  } catch (error) {
+    console.error('Error saving room:', error);
+    res.status(500).json({ error: 'Failed to save room' });
+  }
+});
+
+// ============================================
+// Files API (for room assets - replaces Firebase Storage)
+// ============================================
+
+// Get file
+app.get('/api/v2/files/:prefix/:fileId', (req, res) => {
+  try {
+    const { prefix, fileId } = req.params;
+    const fullId = `${prefix}/${fileId}`;
+    const stmt = db.prepare('SELECT data FROM files WHERE id = ?');
+    const row = stmt.get(fullId);
+    
+    if (!row) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.send(Buffer.from(row.data));
+  } catch (error) {
+    console.error('Error getting file:', error);
+    res.status(500).json({ error: 'Failed to get file' });
+  }
+});
+
+// Save file
+app.post('/api/v2/files/:prefix/:fileId', (req, res) => {
+  try {
+    const { prefix, fileId } = req.params;
+    const fullId = `${prefix}/${fileId}`;
+    const roomId = prefix.split('/').pop(); // Extract roomId from prefix
+    const data = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body);
+    
+    const stmt = db.prepare(`
+      INSERT INTO files (id, room_id, data)
+      VALUES (?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        data = excluded.data
+    `);
+    stmt.run(fullId, roomId, data);
+    
+    res.json({ success: true, id: fullId });
+  } catch (error) {
+    console.error('Error saving file:', error);
+    res.status(500).json({ error: 'Failed to save file' });
   }
 });
 
