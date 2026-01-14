@@ -33,7 +33,7 @@ db.exec(`
   )
 `);
 
-// Files table for room assets
+// Files table for room assets and export files
 db.exec(`
   CREATE TABLE IF NOT EXISTS files (
     id TEXT PRIMARY KEY,
@@ -41,6 +41,15 @@ db.exec(`
     data BLOB NOT NULL,
     created_at INTEGER DEFAULT (strftime('%s', 'now')),
     FOREIGN KEY (room_id) REFERENCES rooms(id)
+  )
+`);
+
+// Exports table for shareable exports
+db.exec(`
+  CREATE TABLE IF NOT EXISTS exports (
+    id TEXT PRIMARY KEY,
+    data BLOB NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
   )
 `);
 
@@ -94,6 +103,49 @@ app.post('/api/v2/post/', (req, res) => {
   } catch (error) {
     console.error('Error saving drawing:', error);
     res.status(500).json({ error: 'Failed to save drawing' });
+  }
+});
+
+// ============================================
+// Exports API (for shareable exports)
+// ============================================
+
+// Get export by ID
+app.get('/api/v2/exports/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const stmt = db.prepare('SELECT data FROM exports WHERE id = ?');
+    const row = stmt.get(id);
+    
+    if (!row) {
+      return res.status(404).json({ error: 'Export not found' });
+    }
+    
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.send(Buffer.from(row.data));
+  } catch (error) {
+    console.error('Error getting export:', error);
+    res.status(500).json({ error: 'Failed to get export' });
+  }
+});
+
+// Save export
+app.post('/api/v2/exports/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body);
+    
+    const stmt = db.prepare(`
+      INSERT INTO exports (id, data)
+      VALUES (?, ?)
+      ON CONFLICT(id) DO UPDATE SET data = excluded.data
+    `);
+    stmt.run(id, data);
+    
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error('Error saving export:', error);
+    res.status(500).json({ error: 'Failed to save export' });
   }
 });
 
@@ -154,13 +206,12 @@ app.post('/api/v2/rooms/:roomId', (req, res) => {
 // Files API (for room assets - replaces Firebase Storage)
 // ============================================
 
-// Get file
-app.get('/api/v2/files/:prefix/:fileId', (req, res) => {
+// Get file - supports multiple path segments
+app.get('/api/v2/files/*', (req, res) => {
   try {
-    const { prefix, fileId } = req.params;
-    const fullId = `${prefix}/${fileId}`;
+    const fullPath = req.params[0];
     const stmt = db.prepare('SELECT data FROM files WHERE id = ?');
-    const row = stmt.get(fullId);
+    const row = stmt.get(fullPath);
     
     if (!row) {
       return res.status(404).json({ error: 'File not found' });
@@ -174,23 +225,20 @@ app.get('/api/v2/files/:prefix/:fileId', (req, res) => {
   }
 });
 
-// Save file
-app.post('/api/v2/files/:prefix/:fileId', (req, res) => {
+// Save file - supports multiple path segments
+app.post('/api/v2/files/*', (req, res) => {
   try {
-    const { prefix, fileId } = req.params;
-    const fullId = `${prefix}/${fileId}`;
-    const roomId = prefix.split('/').pop(); // Extract roomId from prefix
+    const fullPath = req.params[0];
     const data = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body);
     
     const stmt = db.prepare(`
-      INSERT INTO files (id, room_id, data)
-      VALUES (?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        data = excluded.data
+      INSERT INTO files (id, data)
+      VALUES (?, ?)
+      ON CONFLICT(id) DO UPDATE SET data = excluded.data
     `);
-    stmt.run(fullId, roomId, data);
+    stmt.run(fullPath, data);
     
-    res.json({ success: true, id: fullId });
+    res.json({ success: true, id: fullPath });
   } catch (error) {
     console.error('Error saving file:', error);
     res.status(500).json({ error: 'Failed to save file' });
