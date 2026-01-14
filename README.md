@@ -10,7 +10,7 @@ A fully self-contained, self-hosted [Excalidraw](https://excalidraw.com) deploym
 - **Single domain** - Everything runs on one domain, only ports 80/443 exposed
 - **Docker-based** - Easy deployment with Docker Compose
 - **Minimal footprint** - Only 3 containers (Caddy serves static files directly)
-- **CI/CD ready** - GitHub Actions workflow for building and pushing images
+- **ARM64 compatible** - Works on Raspberry Pi 5 and other ARM devices
 
 ## Architecture
 
@@ -43,35 +43,7 @@ A fully self-contained, self-hosted [Excalidraw](https://excalidraw.com) deploym
 - A domain with DNS managed by Cloudflare
 - Cloudflare API token with DNS edit permissions
 
-## Deployment Options
-
-### Option A: Use Pre-built Images (Recommended)
-
-Fastest deployment - pulls pre-built images from GitHub Container Registry.
-
-```bash
-# 1. Configure environment
-cp .env.example .env
-# Edit .env with your values (DOMAIN, CF_API_TOKEN, EMAIL, GITHUB_USER)
-
-# 2. Deploy
-docker compose -f docker-compose.prod.yml up -d
-```
-
-### Option B: Build Locally
-
-Build everything from source (takes 5-10 minutes).
-
-```bash
-# 1. Configure environment
-cp .env.example .env
-# Edit .env with your values (DOMAIN, BASE_URL, CF_API_TOKEN, EMAIL)
-
-# 2. Build and deploy
-docker compose up -d --build
-```
-
-## Quick Start (Full Guide)
+## Quick Start
 
 ### 1. Clone the repository
 
@@ -89,18 +61,10 @@ cp .env.example .env
 Edit `.env` with your values:
 
 ```bash
-# Your domain
 DOMAIN=draw.yourdomain.com
-
-# Base URL (only needed for local builds)
 BASE_URL=https://draw.yourdomain.com
-
-# Cloudflare credentials
 CF_API_TOKEN=your_cloudflare_api_token
 EMAIL=your_email@example.com
-
-# GitHub username (only needed for pre-built images)
-GITHUB_USER=erfianugrah
 ```
 
 ### 3. Point DNS to your server
@@ -111,17 +75,13 @@ Create an A record in Cloudflare:
 - **Content:** Your server's IP address
 - **Proxy status:** DNS only (grey cloud) recommended for WebSocket
 
-### 4. Deploy
+### 4. Build and deploy
 
-**Using pre-built images:**
-```bash
-docker compose -f docker-compose.prod.yml up -d
-```
-
-**Building locally:**
 ```bash
 docker compose up -d --build
 ```
+
+First build takes **5-10 minutes** on x86 (longer on ARM devices like RPi5).
 
 ### 5. Access your instance
 
@@ -142,13 +102,12 @@ Caddy will automatically obtain SSL certificates via Cloudflare DNS-01 challenge
 
 ### Environment Variables
 
-| Variable | Required For | Description | Example |
-|----------|--------------|-------------|---------|
-| `DOMAIN` | Both | Your domain (used by Caddy) | `draw.example.com` |
-| `BASE_URL` | Local build | Full URL with protocol | `https://draw.example.com` |
-| `CF_API_TOKEN` | Both | Cloudflare API token | `abc123...` |
-| `EMAIL` | Both | Email for Let's Encrypt | `you@example.com` |
-| `GITHUB_USER` | Pre-built | GitHub username for GHCR | `erfianugrah` |
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `DOMAIN` | Your domain (used by Caddy) | `draw.example.com` |
+| `BASE_URL` | Full URL with protocol | `https://draw.example.com` |
+| `CF_API_TOKEN` | Cloudflare API token | `abc123...` |
+| `EMAIL` | Email for Let's Encrypt | `you@example.com` |
 
 ### Customizing Excalidraw
 
@@ -168,34 +127,6 @@ ARG VITE_APP_DISABLE_TRACKING     # Disable telemetry (default: true)
 | `caddy` | 80, 443 (exposed) | Reverse proxy, auto-HTTPS, static file server |
 | `excalidraw-room` | 3002 (internal) | Real-time collaboration (Socket.io) |
 | `excalidraw-storage` | 3003 (internal) | Storage API (SQLite + Express) |
-
-## CI/CD with GitHub Actions
-
-The repository includes a GitHub Actions workflow that automatically builds and pushes images to GHCR.
-
-### Automatic builds
-
-Images are built automatically when you push changes to:
-- `caddy/`
-- `excalidraw-room/`
-- `excalidraw-storage/`
-
-### Manual builds (different domain)
-
-To build for a different domain:
-
-1. Go to Actions → "Build and Push Images"
-2. Click "Run workflow"
-3. Enter your domain (e.g., `draw.example.com`)
-4. Images will be tagged with your domain
-
-### Image tags
-
-| Image | Tags |
-|-------|------|
-| `ghcr.io/USER/excalidraw-caddy` | `latest`, `draw.example.com` |
-| `ghcr.io/USER/excalidraw-room` | `latest` |
-| `ghcr.io/USER/excalidraw-storage` | `latest` |
 
 ## Data Persistence
 
@@ -226,33 +157,31 @@ docker run --rm \
 ## Commands
 
 ```bash
-# === Using pre-built images ===
-docker compose -f docker-compose.prod.yml up -d
-docker compose -f docker-compose.prod.yml down
-docker compose -f docker-compose.prod.yml pull   # Update to latest images
-docker compose -f docker-compose.prod.yml logs -f
+# Start services (uses cached images)
+docker compose up -d
 
-# === Building locally ===
+# Build and start (first time or after changes)
 docker compose up -d --build
-docker compose down
-docker compose build --no-cache caddy   # Rebuild Caddy + frontend
-docker compose logs -f
 
-# === Common ===
-docker compose ps                        # Check status
-docker compose logs -f caddy             # View Caddy logs
-docker compose down -v                   # Remove everything including data
+# Stop services
+docker compose down
+
+# View logs
+docker compose logs -f
+docker compose logs -f caddy
+
+# Rebuild from scratch
+docker compose build --no-cache
+docker compose up -d
+
+# Remove everything including data
+docker compose down -v
 ```
 
 ## Updating
 
-**Pre-built images:**
-```bash
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-```
+To update to the latest Excalidraw version:
 
-**Local builds:**
 ```bash
 docker compose build --no-cache caddy excalidraw-room
 docker compose up -d
@@ -262,7 +191,6 @@ docker compose up -d
 
 ### SSL Certificate Issues
 
-Check Caddy logs:
 ```bash
 docker compose logs caddy | grep -i "error\|certificate\|acme"
 ```
@@ -275,52 +203,26 @@ Common issues:
 ### Collaboration Not Working
 
 1. Check WebSocket in browser DevTools → Network → WS tab
-2. Verify excalidraw-room is running:
-   ```bash
-   docker compose logs excalidraw-room
-   ```
+2. Verify excalidraw-room is running: `docker compose logs excalidraw-room`
 3. Ensure Cloudflare proxy is disabled (grey cloud) or WebSocket is enabled
 
 ### Storage Errors ("Couldn't save to backend")
 
-1. Check storage service:
-   ```bash
-   docker compose logs excalidraw-storage
-   ```
-2. Test the API:
-   ```bash
-   curl -X POST https://yourdomain.com/api/v2/post/ \
-     -H "Content-Type: application/json" \
-     -d '{"test":"data"}'
-   ```
-3. Check SQLite database:
-   ```bash
-   docker exec excalidraw-storage ls -la /app/data/
-   ```
-
-### Container Won't Start
-
 ```bash
-# Check container status
-docker compose ps -a
+# Check storage service
+docker compose logs excalidraw-storage
 
-# View startup logs
-docker compose logs --tail=50 <service-name>
-
-# Restart specific service
-docker compose restart <service-name>
+# Test the API
+curl -X POST https://yourdomain.com/api/v2/post/ \
+  -H "Content-Type: application/json" \
+  -d '{"test":"data"}'
 ```
 
 ### Rebuild From Scratch
 
 ```bash
-# Stop and remove everything
 docker compose down -v
-
-# Remove built images
 docker rmi $(docker images 'draw-*' -q) 2>/dev/null
-
-# Fresh build
 docker compose up -d --build
 ```
 
@@ -331,41 +233,20 @@ draw/
 ├── .env.example              # Environment template
 ├── .gitignore
 ├── Caddyfile                 # Reverse proxy + static file config
-├── docker-compose.yml        # Local build orchestration
-├── docker-compose.prod.yml   # Pre-built images orchestration
+├── docker-compose.yml        # Service orchestration
 ├── README.md
-│
-├── .github/
-│   └── workflows/
-│       └── build.yml         # CI/CD for building images
-│
 ├── caddy/
-│   └── Dockerfile            # Caddy + Cloudflare plugin + Excalidraw build
-│
+│   └── Dockerfile            # Caddy + Cloudflare + Excalidraw build
 ├── excalidraw-room/
-│   └── Dockerfile            # Collaboration server build
-│
+│   └── Dockerfile            # Collaboration server
 └── excalidraw-storage/
-    ├── Dockerfile            # Storage API container
-    ├── index.js              # Express + SQLite API
+    ├── Dockerfile            # Storage API
+    ├── index.js              # Express + SQLite
     └── package.json
 ```
-
-## Security Considerations
-
-- **Cloudflare API token:** Keep `.env` secure and never commit it
-- **CORS:** Storage and room servers allow all origins by default; restrict in production if needed
-- **Database:** SQLite file is stored in a Docker volume; backup regularly
-- **Updates:** Periodically rebuild/pull to get security patches from upstream
 
 ## License
 
 - **Excalidraw:** MIT License
 - **excalidraw-room:** MIT License
 - **This deployment setup:** MIT License
-
-## Credits
-
-- [Excalidraw](https://github.com/excalidraw/excalidraw) - The amazing whiteboard app
-- [excalidraw-room](https://github.com/excalidraw/excalidraw-room) - Collaboration server
-- [Caddy](https://caddyserver.com/) - Automatic HTTPS reverse proxy
