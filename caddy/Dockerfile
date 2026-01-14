@@ -1,8 +1,47 @@
 ARG VERSION=2.10.0
 
-FROM caddy:${VERSION}-builder AS builder
+# Build Caddy with Cloudflare DNS plugin
+FROM caddy:${VERSION}-builder AS caddy-builder
 RUN xcaddy build \
     --with github.com/caddy-dns/cloudflare
 
+# Build Excalidraw frontend
+FROM node:18 AS excalidraw-builder
+
+WORKDIR /app
+
+# Clone excalidraw
+RUN git clone --depth 1 https://github.com/excalidraw/excalidraw.git .
+
+# Install dependencies
+RUN yarn install --network-timeout 600000
+
+# Build args for configuration
+ARG VITE_APP_WS_SERVER_URL
+ARG VITE_APP_BACKEND_V2_GET_URL
+ARG VITE_APP_BACKEND_V2_POST_URL
+ARG VITE_APP_DISABLE_TRACKING=true
+
+# Create production env file
+RUN echo "MODE=production" > .env.production && \
+    echo "VITE_APP_WS_SERVER_URL=${VITE_APP_WS_SERVER_URL}" >> .env.production && \
+    echo "VITE_APP_BACKEND_V2_GET_URL=${VITE_APP_BACKEND_V2_GET_URL}" >> .env.production && \
+    echo "VITE_APP_BACKEND_V2_POST_URL=${VITE_APP_BACKEND_V2_POST_URL}" >> .env.production && \
+    echo "VITE_APP_DISABLE_TRACKING=${VITE_APP_DISABLE_TRACKING}" >> .env.production && \
+    echo "VITE_APP_ENABLE_TRACKING=false" >> .env.production
+
+# Build the app
+RUN yarn build:app:docker
+
+# Final image: Caddy with static files
 FROM caddy:${VERSION}-alpine
-COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+
+# Copy custom Caddy binary with Cloudflare plugin
+COPY --from=caddy-builder /usr/bin/caddy /usr/bin/caddy
+
+# Copy Excalidraw static files
+COPY --from=excalidraw-builder /app/excalidraw-app/build /srv
+
+EXPOSE 80 443
+
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]

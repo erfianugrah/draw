@@ -7,21 +7,21 @@
         dns cloudflare {$CF_API_TOKEN}
     }
 
-    # Storage API - must come before catch-all
+    # Storage API
     handle /api/* {
         reverse_proxy excalidraw-storage:3003
     }
 
     # Socket.io for collaboration (WebSocket + polling)
-    @socketio {
-        path /socket.io/*
-    }
-    handle @socketio {
+    handle /socket.io/* {
         reverse_proxy excalidraw-room:3002
     }
 
-    # Static files - Excalidraw frontend (catch-all)
+    # Static files - Excalidraw frontend
     handle {
-        reverse_proxy excalidraw:80
+        root * /srv
+        encode gzip
+        try_files {path} /index.html
+        file_server
     }
 }

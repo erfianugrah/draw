@@ -1,8 +1,12 @@
 services:
   caddy:
     build:
-      context: ./caddy
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: caddy/Dockerfile
+      args:
+        - VITE_APP_WS_SERVER_URL=${BASE_URL}
+        - VITE_APP_BACKEND_V2_GET_URL=${BASE_URL}/api/v2/
+        - VITE_APP_BACKEND_V2_POST_URL=${BASE_URL}/api/v2/post/
     container_name: excalidraw-caddy
     ports:
       - "80:80"
@@ -17,21 +21,8 @@ services:
       - EMAIL=${EMAIL}
     restart: unless-stopped
     depends_on:
-      - excalidraw
       - excalidraw-room
       - excalidraw-storage
-
-  excalidraw:
-    build:
-      context: ./excalidraw
-      dockerfile: Dockerfile
-      args:
-        # Socket.io appends /socket.io/ automatically, so just use base URL
-        - VITE_APP_WS_SERVER_URL=${BASE_URL}
-        - VITE_APP_BACKEND_V2_GET_URL=${BASE_URL}/api/v2/
-        - VITE_APP_BACKEND_V2_POST_URL=${BASE_URL}/api/v2/post/
-    container_name: excalidraw-app
-    restart: unless-stopped
 
   excalidraw-room:
     build:

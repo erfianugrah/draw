@@ -9,6 +9,7 @@ A fully self-contained, self-hosted [Excalidraw](https://excalidraw.com) deploym
 - **Auto-HTTPS** - Caddy handles SSL certificates automatically via Cloudflare DNS-01
 - **Single domain** - Everything runs on one domain, only ports 80/443 exposed
 - **Docker-based** - Easy deployment with Docker Compose
+- **Minimal footprint** - Only 3 containers (Caddy serves static files directly)
 
 ## Architecture
 
@@ -16,24 +17,24 @@ A fully self-contained, self-hosted [Excalidraw](https://excalidraw.com) deploym
                     Internet
                         │
                         ▼
-        ┌───────────────────────────────┐
-        │     Caddy (ports 80/443)      │
-        │   Auto-HTTPS via Cloudflare   │
-        └───────────────────────────────┘
+        ┌───────────────────────────────────────────┐
+        │          Caddy (ports 80/443)             │
+        │    Auto-HTTPS + Static Files + Proxy      │
+        └───────────────────────────────────────────┘
                         │
-        ┌───────────────┼───────────────┐
-        │               │               │
-        ▼               ▼               ▼
-   ┌─────────┐   ┌───────────┐   ┌───────────┐
-   │  /api/* │   │/socket.io/│   │    /*     │
-   │         │   │           │   │           │
-   │ Storage │   │  Collab   │   │ Frontend  │
-   │ :3003   │   │  :3002    │   │   :80     │
-   │ SQLite  │   │ Socket.io │   │  nginx    │
-   └─────────┘   └───────────┘   └───────────┘
+          ┌─────────────┼─────────────┐
+          │             │             │
+          ▼             ▼             ▼
+     ┌─────────┐  ┌───────────┐  ┌─────────┐
+     │  /api/* │  │/socket.io/│  │   /*    │
+     │         │  │           │  │         │
+     │ Storage │  │  Collab   │  │ Static  │
+     │ :3003   │  │  :3002    │  │ Files   │
+     │ SQLite  │  │ Socket.io │  │ (Caddy) │
+     └─────────┘  └───────────┘  └─────────┘
 ```
 
-**Only ports 80 and 443 are exposed.** All backend services communicate internally via Docker network.
+**Only ports 80 and 443 are exposed.** Caddy serves static files directly and proxies API/WebSocket requests internally.
 
 ## Prerequisites
 
@@ -84,7 +85,7 @@ Create an A record in Cloudflare:
 docker compose up -d --build
 ```
 
-First build takes **5-10 minutes** (compiles Excalidraw from source).
+First build takes **5-10 minutes** (compiles Excalidraw and Caddy from source).
 
 ### 5. Access your instance
 
@@ -114,7 +115,7 @@ Caddy will automatically obtain SSL certificates via Cloudflare DNS-01 challenge
 
 ### Customizing Excalidraw
 
-To modify Excalidraw build options, edit `excalidraw/Dockerfile`. Available build args:
+To modify Excalidraw build options, edit `caddy/Dockerfile`. Available build args:
 
 ```dockerfile
 ARG VITE_APP_WS_SERVER_URL        # WebSocket server URL
@@ -125,12 +126,11 @@ ARG VITE_APP_DISABLE_TRACKING     # Disable telemetry (default: true)
 
 ## Services
 
-| Service | Internal Port | Description |
-|---------|---------------|-------------|
-| `caddy` | 80, 443 (exposed) | Reverse proxy with auto-HTTPS |
-| `excalidraw` | 80 | Frontend (nginx serving static files) |
-| `excalidraw-room` | 3002 | Real-time collaboration (Socket.io) |
-| `excalidraw-storage` | 3003 | Storage API (SQLite + Express) |
+| Service | Port | Description |
+|---------|------|-------------|
+| `caddy` | 80, 443 (exposed) | Reverse proxy, auto-HTTPS, static file server |
+| `excalidraw-room` | 3002 (internal) | Real-time collaboration (Socket.io) |
+| `excalidraw-storage` | 3003 (internal) | Storage API (SQLite + Express) |
 
 ## Data Persistence
 
@@ -147,13 +147,13 @@ Data is stored in Docker volumes:
 ```bash
 # Backup drawings database
 docker run --rm \
-  -v excalidraw-selfhosted_excalidraw-data:/data \
+  -v draw_excalidraw-data:/data \
   -v $(pwd):/backup \
   alpine tar czf /backup/excalidraw-backup-$(date +%Y%m%d).tar.gz /data
 
 # Restore
 docker run --rm \
-  -v excalidraw-selfhosted_excalidraw-data:/data \
+  -v draw_excalidraw-data:/data \
   -v $(pwd):/backup \
   alpine tar xzf /backup/excalidraw-backup-YYYYMMDD.tar.gz -C /
 ```
@@ -172,15 +172,14 @@ docker compose logs -f
 
 # View logs (specific service)
 docker compose logs -f caddy
-docker compose logs -f excalidraw
 docker compose logs -f excalidraw-room
 docker compose logs -f excalidraw-storage
 
 # Rebuild after config changes
 docker compose up -d --build
 
-# Rebuild single service
-docker compose build --no-cache excalidraw
+# Rebuild Caddy + frontend only
+docker compose build --no-cache caddy
 docker compose up -d
 
 # Full rebuild (fresh)
@@ -197,8 +196,8 @@ docker compose down -v
 To update to the latest Excalidraw version:
 
 ```bash
-# Rebuild frontend (pulls latest from GitHub)
-docker compose build --no-cache excalidraw excalidraw-room
+# Rebuild (pulls latest from GitHub)
+docker compose build --no-cache caddy excalidraw-room
 
 # Restart with new images
 docker compose up -d
@@ -264,7 +263,7 @@ docker compose restart <service-name>
 docker compose down -v
 
 # Remove built images
-docker rmi $(docker images 'excalidraw-selfhosted-*' -q)
+docker rmi $(docker images 'draw-*' -q)
 
 # Fresh build
 docker compose up -d --build
@@ -273,19 +272,15 @@ docker compose up -d --build
 ## Project Structure
 
 ```
-excalidraw-selfhosted/
+draw/
 ├── .env.example            # Environment template
 ├── .gitignore
-├── Caddyfile               # Reverse proxy configuration
+├── Caddyfile               # Reverse proxy + static file config
 ├── docker-compose.yml      # Service orchestration
 ├── README.md
 │
 ├── caddy/
-│   └── Dockerfile          # Caddy with Cloudflare DNS plugin
-│
-├── excalidraw/
-│   ├── Dockerfile          # Frontend build from source
-│   └── nginx.conf          # Static file serving config
+│   └── Dockerfile          # Caddy + Cloudflare plugin + Excalidraw build
 │
 ├── excalidraw-room/
 │   └── Dockerfile          # Collaboration server build
