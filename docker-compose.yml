@@ -1,0 +1,65 @@
+services:
+  caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    container_name: excalidraw-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      - DOMAIN=${DOMAIN}
+      - CF_API_TOKEN=${CF_API_TOKEN}
+      - EMAIL=${EMAIL}
+    restart: unless-stopped
+    depends_on:
+      - excalidraw
+      - excalidraw-room
+      - excalidraw-storage
+
+  excalidraw:
+    build:
+      context: ./excalidraw
+      dockerfile: Dockerfile
+      args:
+        # Socket.io appends /socket.io/ automatically, so just use base URL
+        - VITE_APP_WS_SERVER_URL=${BASE_URL}
+        - VITE_APP_BACKEND_V2_GET_URL=${BASE_URL}/api/v2/
+        - VITE_APP_BACKEND_V2_POST_URL=${BASE_URL}/api/v2/post/
+    container_name: excalidraw-app
+    restart: unless-stopped
+
+  excalidraw-room:
+    build:
+      context: ./excalidraw-room
+      dockerfile: Dockerfile
+    container_name: excalidraw-collab
+    restart: unless-stopped
+    environment:
+      - PORT=3002
+      - CORS_ORIGIN=*
+
+  excalidraw-storage:
+    build:
+      context: ./excalidraw-storage
+      dockerfile: Dockerfile
+    container_name: excalidraw-storage
+    restart: unless-stopped
+    environment:
+      - PORT=3003
+      - CORS_ORIGIN=*
+    volumes:
+      - excalidraw-data:/app/data
+
+volumes:
+  excalidraw-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  default:
+    name: excalidraw-network

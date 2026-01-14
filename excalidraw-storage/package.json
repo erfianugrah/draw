@@ -1,0 +1,15 @@
+{
+  "name": "excalidraw-storage",
+  "version": "1.0.0",
+  "description": "Simple storage backend for Excalidraw using SQLite",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "nanoid": "^3.3.7"
+  }
+}

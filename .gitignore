@@ -1,0 +1,32 @@
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+
+# Docker data (if mounted locally)
+data/
+.docker/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak

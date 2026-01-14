@@ -1,0 +1,27 @@
+{
+    email {$EMAIL}
+}
+
+{$DOMAIN} {
+    tls {
+        dns cloudflare {$CF_API_TOKEN}
+    }
+
+    # Storage API - must come before catch-all
+    handle /api/* {
+        reverse_proxy excalidraw-storage:3003
+    }
+
+    # Socket.io for collaboration (WebSocket + polling)
+    @socketio {
+        path /socket.io/*
+    }
+    handle @socketio {
+        reverse_proxy excalidraw-room:3002
+    }
+
+    # Static files - Excalidraw frontend (catch-all)
+    handle {
+        reverse_proxy excalidraw:80
+    }
+}
