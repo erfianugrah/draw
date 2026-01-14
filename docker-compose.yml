@@ -8,9 +8,9 @@ services:
         - VITE_APP_BACKEND_V2_GET_URL=${BASE_URL}/api/v2/
         - VITE_APP_BACKEND_V2_POST_URL=${BASE_URL}/api/v2/post/
     container_name: excalidraw-caddy
-    ports:
-      - "80:80"
-      - "443:443"
+    expose:
+      - 80
+      - 443
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy-data:/data
@@ -19,10 +19,14 @@ services:
       - DOMAIN=${DOMAIN}
       - CF_API_TOKEN=${CF_API_TOKEN}
       - EMAIL=${EMAIL}
+      - TZ=${TZ:-Europe/Amsterdam}
     restart: unless-stopped
     depends_on:
       - excalidraw-room
       - excalidraw-storage
+    networks:
+      excalidraw:
+        ipv4_address: 172.41.1.2
 
   excalidraw-room:
     build:
@@ -30,9 +34,15 @@ services:
       dockerfile: Dockerfile
     container_name: excalidraw-collab
     restart: unless-stopped
+    expose:
+      - 3002
     environment:
       - PORT=3002
       - CORS_ORIGIN=*
+      - TZ=${TZ:-Europe/Amsterdam}
+    networks:
+      excalidraw:
+        ipv4_address: 172.41.1.3
 
   excalidraw-storage:
     build:
@@ -40,11 +50,17 @@ services:
       dockerfile: Dockerfile
     container_name: excalidraw-storage
     restart: unless-stopped
+    expose:
+      - 3003
     environment:
       - PORT=3003
       - CORS_ORIGIN=*
+      - TZ=${TZ:-Europe/Amsterdam}
     volumes:
       - excalidraw-data:/app/data
+    networks:
+      excalidraw:
+        ipv4_address: 172.41.1.4
 
 volumes:
   excalidraw-data:
@@ -52,5 +68,9 @@ volumes:
   caddy-config:
 
 networks:
-  default:
-    name: excalidraw-network
+  excalidraw:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.41.1.0/24
+          gateway: 172.41.1.1
