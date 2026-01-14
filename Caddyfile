@@ -8,7 +8,7 @@
     }
 
     # Storage API
-    handle /api/* {
+    handle_path /api/* {
         reverse_proxy excalidraw-storage:3003
     }
 

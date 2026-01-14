@@ -1,4 +1,5 @@
 ARG VERSION=2.10.0
+ARG EXCALIDRAW_VERSION=v0.18.0
 
 # Build Caddy with Cloudflare DNS plugin
 FROM caddy:${VERSION}-builder AS caddy-builder
@@ -8,10 +9,12 @@ RUN xcaddy build \
 # Build Excalidraw frontend
 FROM node:18 AS excalidraw-builder
 
+ARG EXCALIDRAW_VERSION
+
 WORKDIR /app
 
-# Clone excalidraw
-RUN git clone --depth 1 https://github.com/excalidraw/excalidraw.git .
+# Clone excalidraw at specific version
+RUN git clone --depth 1 --branch ${EXCALIDRAW_VERSION} https://github.com/excalidraw/excalidraw.git .
 
 # Install dependencies
 RUN yarn install --network-timeout 600000
