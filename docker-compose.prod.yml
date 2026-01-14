@@ -1,0 +1,49 @@
+# Production compose file - uses pre-built images from GHCR
+# Usage: docker compose -f docker-compose.prod.yml up -d
+
+services:
+  caddy:
+    image: ghcr.io/${GITHUB_USER:-erfianugrah}/excalidraw-caddy:${DOMAIN:-draw.erfi.dev}
+    container_name: excalidraw-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      - DOMAIN=${DOMAIN}
+      - CF_API_TOKEN=${CF_API_TOKEN}
+      - EMAIL=${EMAIL}
+    restart: unless-stopped
+    depends_on:
+      - excalidraw-room
+      - excalidraw-storage
+
+  excalidraw-room:
+    image: ghcr.io/${GITHUB_USER:-erfianugrah}/excalidraw-room:latest
+    container_name: excalidraw-collab
+    restart: unless-stopped
+    environment:
+      - PORT=3002
+      - CORS_ORIGIN=*
+
+  excalidraw-storage:
+    image: ghcr.io/${GITHUB_USER:-erfianugrah}/excalidraw-storage:latest
+    container_name: excalidraw-storage
+    restart: unless-stopped
+    environment:
+      - PORT=3003
+      - CORS_ORIGIN=*
+    volumes:
+      - excalidraw-data:/app/data
+
+volumes:
+  excalidraw-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  default:
+    name: excalidraw-network
