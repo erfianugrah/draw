@@ -21,6 +21,11 @@
         -Server
     }
 
+    # AI API (text-to-diagram, diagram-to-code)
+    handle_path /api/ai/* {
+        reverse_proxy excalidraw-ai:3004
+    }
+
     # Storage API
     handle_path /api/* {
         reverse_proxy excalidraw-storage:3003

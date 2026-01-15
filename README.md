@@ -8,10 +8,11 @@ A fully self-contained, self-hosted [Excalidraw](https://excalidraw.com) deploym
 - **End-to-end encryption** - Server only stores encrypted blobs; keys stay in URLs
 - **Persistent storage** - Drawings, rooms, and exports saved to SQLite database
 - **Shareable links** - Full support for sharing drawings with encryption
+- **AI-powered diagrams** - Text-to-diagram and wireframe-to-code with your own API keys
 - **Auto-cleanup** - Configurable retention policies for rooms, exports, and drawings
 - **Auto-HTTPS** - Caddy handles SSL certificates via Cloudflare DNS-01
 - **Single domain** - Everything runs on one domain, only ports 80/443 exposed
-- **Docker-based** - Easy deployment with Docker Compose (3 containers)
+- **Docker-based** - Easy deployment with Docker Compose (4 containers)
 - **ARM64 compatible** - Works on Raspberry Pi 5 and other ARM devices
 - **No Firebase** - Completely self-hosted, no external dependencies
 - **Privacy-first** - No analytics, no external CDN requests, no tracking
@@ -27,16 +28,17 @@ A fully self-contained, self-hosted [Excalidraw](https://excalidraw.com) deploym
         │    Auto-HTTPS + Static Files + Proxy      │
         └───────────────────────────────────────────┘
                         │
-          ┌─────────────┼─────────────┐
-          │             │             │
-          ▼             ▼             ▼
-     ┌─────────┐  ┌───────────┐  ┌─────────┐
-     │  /api/* │  │/socket.io/│  │   /*    │
-     │         │  │           │  │         │
-     │ Storage │  │  Collab   │  │ Static  │
-     │ :3003   │  │  :3002    │  │ Files   │
-     │ SQLite  │  │ Socket.io │  │ (Caddy) │
-     └─────────┘  └───────────┘  └─────────┘
+       ┌────────────┬───┴───┬────────────┐
+       │            │       │            │
+       ▼            ▼       ▼            ▼
+  ┌─────────┐ ┌─────────┐ ┌────────┐ ┌─────────┐
+  │/api/ai/*│ │  /api/* │ │/socket │ │   /*    │
+  │         │ │         │ │  .io/  │ │         │
+  │   AI    │ │ Storage │ │ Collab │ │ Static  │
+  │  :3004  │ │  :3003  │ │ :3002  │ │  Files  │
+  │ OpenAI/ │ │ SQLite  │ │Socket. │ │ (Caddy) │
+  │Anthropic│ │         │ │   io   │ │         │
+  └─────────┘ └─────────┘ └────────┘ └─────────┘
 ```
 
 **Only ports 80 and 443 are exposed.** Caddy serves static files directly and proxies API/WebSocket requests internally.
@@ -151,6 +153,22 @@ Caddy will automatically obtain SSL certificates via Cloudflare DNS-01 challenge
 | `DRAWING_MAX_AGE_DAYS` | Days to keep saved drawings | `90` | `365` |
 | `CLEANUP_INTERVAL_HOURS` | How often to run cleanup | `24` | `12` |
 
+#### AI Configuration (Optional)
+
+| Variable | Description | Default | Example |
+|----------|-------------|---------|---------|
+| `AI_PROVIDER` | AI provider to use | `openai` | `openai`, `anthropic`, `ollama` |
+| `OPENAI_API_KEY` | OpenAI API key | - | `sk-...` |
+| `OPENAI_MODEL` | Model for text-to-diagram | `gpt-4o-mini` | `gpt-4o` |
+| `OPENAI_VISION_MODEL` | Model for wireframe-to-code | `gpt-4o` | `gpt-4o` |
+| `ANTHROPIC_API_KEY` | Anthropic API key | - | `sk-ant-...` |
+| `ANTHROPIC_MODEL` | Model for text-to-diagram | `claude-3-haiku-20240307` | `claude-3-5-sonnet-20241022` |
+| `ANTHROPIC_VISION_MODEL` | Model for wireframe-to-code | `claude-3-5-sonnet-20241022` | `claude-3-5-sonnet-20241022` |
+| `OLLAMA_HOST` | Ollama server URL | - | `http://host.docker.internal:11434` |
+| `OLLAMA_MODEL` | Model for text-to-diagram | `llama3.2` | `mistral` |
+| `OLLAMA_VISION_MODEL` | Model for wireframe-to-code | `llava` | `llava:34b` |
+| `AI_RATE_LIMIT_PER_DAY` | Rate limit per IP | `100` | `50` |
+
 ### Auto-Cleanup
 
 The storage service automatically removes old data based on the retention settings above. Cleanup runs:
@@ -167,8 +185,79 @@ To modify Excalidraw build options, edit `caddy/Dockerfile`. Available build arg
 ARG VITE_APP_WS_SERVER_URL        # WebSocket server URL
 ARG VITE_APP_BACKEND_V2_GET_URL   # Storage GET endpoint
 ARG VITE_APP_BACKEND_V2_POST_URL  # Storage POST endpoint
+ARG VITE_APP_AI_BACKEND           # AI API endpoint
 ARG VITE_APP_DISABLE_TRACKING     # Disable telemetry (default: true)
 ```
+
+## AI Features
+
+This deployment includes a self-hosted AI backend that powers two features:
+
+### Text-to-Diagram
+
+Type a natural language description and get a diagram:
+1. Open the command palette (Ctrl/Cmd + K) and search for "Text to diagram"
+2. Type a description like "A flowchart showing user authentication"
+3. The AI generates Mermaid syntax, which is converted to Excalidraw elements
+4. Click "Insert" to add to your canvas
+
+### Wireframe-to-Code (Diagram-to-Code)
+
+Draw a wireframe and convert it to HTML:
+1. Create a frame on the canvas
+2. Draw your wireframe UI inside the frame
+3. Select the frame and click "Generate code" (or use command palette)
+4. The AI analyzes your wireframe and generates HTML/CSS
+5. Preview the result and copy the code
+
+### Mermaid Diagrams (No AI Required)
+
+You can also create diagrams from Mermaid syntax directly:
+1. Open the Text-to-diagram dialog
+2. Switch to the "Mermaid" tab
+3. Type or paste Mermaid syntax
+4. Click "Insert" - no AI needed!
+
+### Setting Up AI
+
+1. Choose a provider and get an API key:
+   - **OpenAI**: https://platform.openai.com/api-keys
+   - **Anthropic**: https://console.anthropic.com/
+   - **Ollama**: https://ollama.ai (free, runs locally)
+
+2. Add to your `.env`:
+   ```bash
+   # For OpenAI
+   AI_PROVIDER=openai
+   OPENAI_API_KEY=sk-your-key-here
+   
+   # OR for Anthropic
+   AI_PROVIDER=anthropic
+   ANTHROPIC_API_KEY=sk-ant-your-key-here
+   
+   # OR for Ollama (local)
+   AI_PROVIDER=ollama
+   OLLAMA_HOST=http://host.docker.internal:11434
+   ```
+
+3. Rebuild and restart:
+   ```bash
+   docker compose up -d --build
+   ```
+
+### Cost Estimates
+
+| Provider | Text-to-Diagram | Wireframe-to-Code |
+|----------|-----------------|-------------------|
+| GPT-4o-mini | ~$0.001/request | ~$0.01/request |
+| GPT-4o | ~$0.01/request | ~$0.05/request |
+| Claude 3 Haiku | ~$0.001/request | ~$0.005/request |
+| Claude 3.5 Sonnet | ~$0.01/request | ~$0.03/request |
+| Ollama (local) | Free | Free |
+
+### Disabling AI
+
+To run without AI features, simply don't set any API keys. The AI service will start but return errors, and the UI features will show appropriate messages.
 
 ## Services
 
@@ -177,6 +266,7 @@ ARG VITE_APP_DISABLE_TRACKING     # Disable telemetry (default: true)
 | `caddy` | 80, 443 (exposed) | Reverse proxy, auto-HTTPS, static file server |
 | `excalidraw-room` | 3002 (internal) | Real-time collaboration (Socket.io) |
 | `excalidraw-storage` | 3003 (internal) | Storage API (SQLite + Express) |
+| `excalidraw-ai` | 3004 (internal) | AI features (text-to-diagram, wireframe-to-code) |
 
 ## Data Persistence
 
@@ -295,6 +385,10 @@ draw/
 │   ├── Dockerfile            # Storage API
 │   ├── index.js              # Express + SQLite + auto-cleanup
 │   └── package.json
+├── excalidraw-ai/
+│   ├── Dockerfile            # AI service
+│   ├── index.js              # Express + OpenAI/Anthropic/Ollama
+│   └── package.json
 └── patches/
     ├── firebase.ts           # Replaces Firebase with self-hosted API
     ├── ExportToExcalidrawPlus.tsx  # Local share instead of Excalidraw+
@@ -313,6 +407,8 @@ The storage service exposes:
 | `/api/v2/rooms/:roomId` | GET/POST | Room state for collaboration |
 | `/api/v2/files/*` | GET/POST | File/asset storage |
 | `/api/v2/exports/:id` | GET/POST | Shareable export storage |
+| `/api/ai/v1/ai/text-to-diagram/generate` | POST | AI text-to-diagram |
+| `/api/ai/v1/ai/diagram-to-code/generate` | POST | AI wireframe-to-code |
 
 ### Database Schema
 
@@ -340,6 +436,7 @@ If you're running behind a Cloudflare Tunnel instead of exposing ports directly:
    - `172.41.1.2` - Caddy
    - `172.41.1.3` - excalidraw-room
    - `172.41.1.4` - excalidraw-storage
+   - `172.41.1.5` - excalidraw-ai
 
 ## Privacy
 

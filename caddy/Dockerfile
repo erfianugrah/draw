@@ -31,6 +31,7 @@ RUN yarn install --network-timeout 600000
 ARG VITE_APP_WS_SERVER_URL
 ARG VITE_APP_BACKEND_V2_GET_URL
 ARG VITE_APP_BACKEND_V2_POST_URL
+ARG VITE_APP_AI_BACKEND
 ARG VITE_APP_DISABLE_TRACKING=true
 
 # Create production env file
@@ -38,6 +39,7 @@ RUN echo "MODE=production" > .env.production && \
     echo "VITE_APP_WS_SERVER_URL=${VITE_APP_WS_SERVER_URL}" >> .env.production && \
     echo "VITE_APP_BACKEND_V2_GET_URL=${VITE_APP_BACKEND_V2_GET_URL}" >> .env.production && \
     echo "VITE_APP_BACKEND_V2_POST_URL=${VITE_APP_BACKEND_V2_POST_URL}" >> .env.production && \
+    echo "VITE_APP_AI_BACKEND=${VITE_APP_AI_BACKEND}" >> .env.production && \
     echo "VITE_APP_DISABLE_TRACKING=${VITE_APP_DISABLE_TRACKING}" >> .env.production && \
     echo "VITE_APP_ENABLE_TRACKING=false" >> .env.production
 
