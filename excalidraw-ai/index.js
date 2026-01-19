@@ -70,13 +70,16 @@ Rules:
 4. Use classDiagram for object/class structures
 5. Keep node labels concise but descriptive
 6. Use appropriate arrow types (-->, --o, --x, -.->)
-7. For flowcharts, use proper node shapes: [rectangular], (rounded), {diamond}, ((circle))
+7. For flowcharts, ALWAYS use a node ID before the shape. Node shapes are: ID[rectangular], ID(rounded), ID{diamond}, ID((circle))
+8. NEVER use shapes without an ID prefix - ((Start)) is WRONG, use A((Start)) instead
 
 Examples of valid output:
 flowchart TD
-    A[Start] --> B{Decision}
+    A((Start)) --> B{Decision}
     B -->|Yes| C[Action 1]
     B -->|No| D[Action 2]
+    C --> E((End))
+    D --> E
 
 sequenceDiagram
     User->>Server: Request
