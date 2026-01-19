@@ -72,12 +72,13 @@ Rules:
 6. Use appropriate arrow types (-->, --o, --x, -.->)
 7. For flowcharts, ALWAYS use a node ID before the shape. Node shapes are: ID[rectangular], ID(rounded), ID{diamond}, ID((circle))
 8. NEVER use shapes without an ID prefix - ((Start)) is WRONG, use A((Start)) instead
+9. NEVER use parentheses (), brackets [], braces {}, or pipe | characters inside node labels - they break parsing. Use alternative text instead (e.g., "Call fetch" not "fetch()", "Array of items" not "items[]")
 
 Examples of valid output:
 flowchart TD
     A((Start)) --> B{Decision}
     B -->|Yes| C[Action 1]
-    B -->|No| D[Action 2]
+    B -->|No| D[Call API]
     C --> E((End))
     D --> E
 
