@@ -418,6 +418,51 @@ SQLite stores four tables:
 - **files** - Binary assets (images, etc.)
 - **exports** - Shareable exports
 
+## Cloudflare Access Setup (Optional)
+
+If you're protecting this deployment with Cloudflare Access, you need to configure CORS settings to allow API requests from authenticated users.
+
+### The Problem
+
+When a user is authenticated with Cloudflare Access and makes an API request (e.g., to `/api/ai/v1/ai/text-to-diagram/generate`), the browser sends a CORS preflight (OPTIONS) request first. However, browsers never send cookies with OPTIONS requests by design, so Cloudflare Access rejects the preflight, causing CORS errors.
+
+### The Solution
+
+Configure CORS settings in your Cloudflare Access application:
+
+1. Go to **Cloudflare One** → **Access** → **Applications**
+2. Find your application and click **Configure**
+3. Go to **Advanced settings** → **Cross-Origin Resource Sharing (CORS) settings**
+4. Configure:
+   - **Access-Control-Allow-Origin**: `https://draw.yourdomain.com`
+   - **Access-Control-Allow-Methods**: Check all needed methods (GET, POST, PUT, OPTIONS)
+   - **Access-Control-Allow-Headers**: Enable "Allow all headers" or specify `Content-Type`
+   - **Access-Control-Allow-Credentials**: `true`
+   - **Access-Control-Max-Age**: `3600` (or your preference)
+5. Save the application
+
+If using Terraform, add a `cors_headers` block to your Access application:
+
+```hcl
+resource "cloudflare_zero_trust_access_application" "draw" {
+  # ... other settings ...
+  
+  cors_headers {
+    allow_all_headers = true
+    allow_all_methods = true
+    allow_credentials = true
+    allowed_origins   = ["draw.yourdomain.com"]
+    max_age           = 3600
+  }
+}
+```
+
+### Cookie Settings
+
+For best compatibility with Cloudflare Access, the application is configured with:
+- `http_only_cookie_attribute = true` - Prevents JavaScript access to auth cookies
+- `same_site_cookie_attribute = "lax"` - Allows cookies on same-site requests
+
 ## Cloudflare Tunnel Setup (Optional)
 
 If you're running behind a Cloudflare Tunnel instead of exposing ports directly:

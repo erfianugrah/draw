@@ -56,6 +56,7 @@ export const exportToExcalidrawPlus = async (
     method: "POST",
     headers: { "Content-Type": "application/octet-stream" },
     body: blob,
+    credentials: "include",
   });
 
   if (!response.ok) {

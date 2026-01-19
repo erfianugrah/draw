@@ -21,13 +21,36 @@
         -Server
     }
 
+    # Handle CORS preflight (OPTIONS) for API routes
+    # This must come BEFORE the actual API handlers to intercept preflight requests
+    # before Cloudflare Access can redirect them
+    @api_options {
+        method OPTIONS
+        path /api/*
+    }
+    handle @api_options {
+        header Access-Control-Allow-Origin "{header.Origin}"
+        header Access-Control-Allow-Methods "GET, POST, PUT, OPTIONS"
+        header Access-Control-Allow-Headers "Content-Type, CF-Access-Client-Id, CF-Access-Client-Secret"
+        header Access-Control-Allow-Credentials "true"
+        header Access-Control-Max-Age "86400"
+        respond 204
+    }
+
     # AI API (text-to-diagram, diagram-to-code)
     handle_path /api/ai/* {
+        # Add CORS headers for actual requests (with credentials support)
+        header Access-Control-Allow-Origin "{header.Origin}"
+        header Access-Control-Allow-Credentials "true"
+        header Access-Control-Expose-Headers "X-Ratelimit-Limit, X-Ratelimit-Remaining"
         reverse_proxy excalidraw-ai:3004
     }
 
     # Storage API
     handle_path /api/* {
+        # Add CORS headers for actual requests (with credentials support)
+        header Access-Control-Allow-Origin "{header.Origin}"
+        header Access-Control-Allow-Credentials "true"
         reverse_proxy excalidraw-storage:3003
     }
 

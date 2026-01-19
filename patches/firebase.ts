@@ -93,6 +93,7 @@ export const saveFilesToFirebase = async ({
             method: "POST",
             headers: { "Content-Type": "application/octet-stream" },
             body: buffer,
+            credentials: "include",
           },
         );
         if (response.ok) {
@@ -123,6 +124,7 @@ export const saveToFirebase = async (
     // Get existing room data
     const existingResponse = await fetch(
       `${STORAGE_API}/api/v2/rooms/${roomId}`,
+      { credentials: "include" },
     );
     let reconciledElements = elements;
 
@@ -166,6 +168,7 @@ export const saveToFirebase = async (
         iv: btoa(String.fromCharCode(...iv)),
         ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
       }),
+      credentials: "include",
     });
 
     if (!response.ok) {
@@ -186,7 +189,9 @@ export const loadFromFirebase = async (
   socket: Socket | null,
 ): Promise<readonly SyncableExcalidrawElement[] | null> => {
   try {
-    const response = await fetch(`${STORAGE_API}/api/v2/rooms/${roomId}`);
+    const response = await fetch(`${STORAGE_API}/api/v2/rooms/${roomId}`, {
+      credentials: "include",
+    });
     if (!response.ok) {
       return null;
     }
@@ -228,6 +233,7 @@ export const loadFilesFromFirebase = async (
       try {
         const response = await fetch(
           `${STORAGE_API}/api/v2/files/${prefix}/${id}`,
+          { credentials: "include" },
         );
         if (response.ok) {
           const arrayBuffer = await response.arrayBuffer();

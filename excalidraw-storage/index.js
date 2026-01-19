@@ -105,9 +105,10 @@ setInterval(runCleanup, CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000);
 // ============================================
 
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: process.env.CORS_ORIGIN || true, // true = reflect request origin (required for credentials)
+  credentials: true, // Allow cookies/auth headers
   methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
-  allowedHeaders: ['Content-Type']
+  allowedHeaders: ['Content-Type', 'CF-Access-Client-Id', 'CF-Access-Client-Secret']
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.raw({ limit: '50mb', type: 'application/octet-stream' }));

@@ -314,9 +314,10 @@ const cleanHTMLOutput = (output) => {
 // ============================================
 
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: process.env.CORS_ORIGIN || true, // true = reflect request origin (required for credentials)
+  credentials: true, // Allow cookies/auth headers
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
+  allowedHeaders: ['Content-Type', 'CF-Access-Client-Id', 'CF-Access-Client-Secret'],
   exposedHeaders: ['X-Ratelimit-Limit', 'X-Ratelimit-Remaining']
 }));
 
