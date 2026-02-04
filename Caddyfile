@@ -62,6 +62,25 @@
     # Static files - Excalidraw frontend
     handle {
         root * /srv
+
+        # Prevent caching of index.html to ensure service worker updates are detected
+        @html {
+            path / /index.html
+        }
+        header @html Cache-Control "no-cache, no-store, must-revalidate"
+
+        # Prevent caching of service worker files
+        @sw {
+            path /sw.js /workbox-*.js /registerSW.js
+        }
+        header @sw Cache-Control "no-cache, no-store, must-revalidate"
+
+        # Long cache for hashed assets (immutable - filename changes when content changes)
+        @hashedAssets {
+            path /assets/*
+        }
+        header @hashedAssets Cache-Control "public, max-age=31536000, immutable"
+
         try_files {path} /index.html
         file_server
     }
