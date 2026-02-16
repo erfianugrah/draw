@@ -7,6 +7,9 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3003;
 
+// API key authentication (optional - set API_KEY env var to enable)
+const API_KEY = process.env.API_KEY || '';
+
 // Cleanup configuration (in days)
 const ROOM_MAX_AGE_DAYS = parseInt(process.env.ROOM_MAX_AGE_DAYS || '30', 10);
 const EXPORT_MAX_AGE_DAYS = parseInt(process.env.EXPORT_MAX_AGE_DAYS || '30', 10);
@@ -16,6 +19,12 @@ const CLEANUP_INTERVAL_HOURS = parseInt(process.env.CLEANUP_INTERVAL_HOURS || '2
 // Initialize SQLite database
 const dbPath = process.env.DB_PATH || path.join(__dirname, 'data', 'excalidraw.db');
 const db = new Database(dbPath);
+
+// Enable WAL mode for better concurrent access
+db.pragma('journal_mode = WAL');
+
+// Enable foreign key enforcement [L2]
+db.pragma('foreign_keys = ON');
 
 // Create tables
 db.exec(`
@@ -59,9 +68,14 @@ db.exec(`
   )
 `);
 
+// Enable incremental vacuum mode for non-blocking space reclaim [M3]
+db.pragma('auto_vacuum = INCREMENTAL');
+
 // ============================================
 // Auto-cleanup of old data
 // ============================================
+
+const VACUUM_THRESHOLD = 100; // Only vacuum if more than this many rows deleted
 
 const runCleanup = () => {
   const now = Math.floor(Date.now() / 1000);
@@ -85,12 +99,16 @@ const runCleanup = () => {
     const drawingCutoff = now - (DRAWING_MAX_AGE_DAYS * 24 * 60 * 60);
     const drawingResult = db.prepare('DELETE FROM drawings WHERE updated_at < ?').run(drawingCutoff);
     
-    console.log(`Cleanup completed: ${roomResult.changes} rooms, ${orphanedFiles.changes} orphaned files, ${exportResult.changes} exports, ${drawingResult.changes} drawings deleted`);
+    const totalDeleted = roomResult.changes + orphanedFiles.changes + exportResult.changes + drawingResult.changes;
+    console.log(`[cleanup] ${roomResult.changes} rooms, ${orphanedFiles.changes} orphaned files, ${exportResult.changes} exports, ${drawingResult.changes} drawings deleted`);
     
-    // Vacuum the database to reclaim space
-    db.exec('VACUUM');
+    // Only vacuum if significant deletions occurred [M3]
+    if (totalDeleted >= VACUUM_THRESHOLD) {
+      console.log(`[cleanup] Running incremental vacuum (${totalDeleted} rows deleted)`);
+      db.pragma('incremental_vacuum');
+    }
   } catch (error) {
-    console.error('Cleanup error:', error);
+    console.error('[cleanup] Error:', error);
   }
 };
 
@@ -98,26 +116,76 @@ const runCleanup = () => {
 runCleanup();
 
 // Schedule periodic cleanup
-setInterval(runCleanup, CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000);
+const cleanupInterval = setInterval(runCleanup, CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000);
+
+// ============================================
+// Graceful shutdown [M4]
+// ============================================
+
+const shutdown = (signal) => {
+  console.log(`[shutdown] Received ${signal}, closing gracefully...`);
+  clearInterval(cleanupInterval);
+  try {
+    db.close();
+    console.log('[shutdown] Database closed');
+  } catch (err) {
+    console.error('[shutdown] Error closing database:', err);
+  }
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 // ============================================
 // Middleware
 // ============================================
 
+// Request logging [L4]
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`[http] ${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`);
+  });
+  next();
+});
+
 app.use(cors({
   origin: process.env.CORS_ORIGIN || true, // true = reflect request origin (required for credentials)
   credentials: true, // Allow cookies/auth headers
   methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'CF-Access-Client-Id', 'CF-Access-Client-Secret']
+  allowedHeaders: ['Content-Type', 'CF-Access-Client-Id', 'CF-Access-Client-Secret', 'X-API-Key']
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.raw({ limit: '50mb', type: 'application/octet-stream' }));
 
-// Health check
+// API key authentication middleware [H2]
+// Only enforced on write endpoints when API_KEY is configured.
+// Requests from the Excalidraw frontend pass through Cloudflare Access
+// (which sets Cf-Access-Jwt-Assertion header), so those are allowed through.
+// The API key is for external/programmatic access protection.
+const requireApiKey = (req, res, next) => {
+  if (!API_KEY) {
+    return next(); // No API key configured, skip auth
+  }
+  // Allow requests that passed through Cloudflare Access (JWT present)
+  if (req.headers['cf-access-jwt-assertion']) {
+    return next();
+  }
+  const provided = req.headers['x-api-key'];
+  if (provided === API_KEY) {
+    return next();
+  }
+  return res.status(401).json({ error: 'Unauthorized: invalid or missing API key' });
+};
+
+// Health check (no auth required)
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
     message: 'Excalidraw storage server is up',
+    authEnabled: !!API_KEY,
     cleanup: {
       roomMaxAgeDays: ROOM_MAX_AGE_DAYS,
       exportMaxAgeDays: EXPORT_MAX_AGE_DAYS,
@@ -131,7 +199,7 @@ app.get('/', (req, res) => {
 // Shareable Links API
 // ============================================
 
-// Get drawing by ID
+// Get drawing by ID (read - no auth required)
 app.get('/api/v2/:id', (req, res) => {
   try {
     const { id } = req.params;
@@ -145,13 +213,13 @@ app.get('/api/v2/:id', (req, res) => {
     res.setHeader('Content-Type', 'application/octet-stream');
     res.send(Buffer.from(row.data));
   } catch (error) {
-    console.error('Error getting drawing:', error);
+    console.error('[drawings] Error getting drawing:', error);
     res.status(500).json({ error: 'Failed to get drawing' });
   }
 });
 
-// Save new drawing
-app.post('/api/v2/post/', (req, res) => {
+// Save new drawing (write - auth required)
+app.post('/api/v2/post/', requireApiKey, (req, res) => {
   try {
     const id = nanoid(22);
     const data = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
@@ -161,7 +229,7 @@ app.post('/api/v2/post/', (req, res) => {
     
     res.json({ id });
   } catch (error) {
-    console.error('Error saving drawing:', error);
+    console.error('[drawings] Error saving drawing:', error);
     res.status(500).json({ error: 'Failed to save drawing' });
   }
 });
@@ -170,7 +238,7 @@ app.post('/api/v2/post/', (req, res) => {
 // Exports API (for shareable exports)
 // ============================================
 
-// Get export by ID
+// Get export by ID (read - no auth required)
 app.get('/api/v2/exports/:id', (req, res) => {
   try {
     const { id } = req.params;
@@ -184,13 +252,13 @@ app.get('/api/v2/exports/:id', (req, res) => {
     res.setHeader('Content-Type', 'application/octet-stream');
     res.send(Buffer.from(row.data));
   } catch (error) {
-    console.error('Error getting export:', error);
+    console.error('[exports] Error getting export:', error);
     res.status(500).json({ error: 'Failed to get export' });
   }
 });
 
-// Save export
-app.post('/api/v2/exports/:id', (req, res) => {
+// Save export (write - auth required)
+app.post('/api/v2/exports/:id', requireApiKey, (req, res) => {
   try {
     const { id } = req.params;
     const data = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body);
@@ -204,7 +272,7 @@ app.post('/api/v2/exports/:id', (req, res) => {
     
     res.json({ success: true, id });
   } catch (error) {
-    console.error('Error saving export:', error);
+    console.error('[exports] Error saving export:', error);
     res.status(500).json({ error: 'Failed to save export' });
   }
 });
@@ -213,7 +281,7 @@ app.post('/api/v2/exports/:id', (req, res) => {
 // Rooms API (for collaboration)
 // ============================================
 
-// Get room scene data
+// Get room scene data (read - no auth required)
 app.get('/api/v2/rooms/:roomId', (req, res) => {
   try {
     const { roomId } = req.params;
@@ -230,13 +298,13 @@ app.get('/api/v2/rooms/:roomId', (req, res) => {
       ciphertext: row.ciphertext ? Buffer.from(row.ciphertext).toString('base64') : null
     });
   } catch (error) {
-    console.error('Error getting room:', error);
+    console.error('[rooms] Error getting room:', error);
     res.status(500).json({ error: 'Failed to get room' });
   }
 });
 
-// Save/update room scene data
-app.post('/api/v2/rooms/:roomId', (req, res) => {
+// Save/update room scene data (write - auth required)
+app.post('/api/v2/rooms/:roomId', requireApiKey, (req, res) => {
   try {
     const { roomId } = req.params;
     const { sceneVersion, iv, ciphertext } = req.body;
@@ -257,7 +325,7 @@ app.post('/api/v2/rooms/:roomId', (req, res) => {
     
     res.json({ success: true, roomId });
   } catch (error) {
-    console.error('Error saving room:', error);
+    console.error('[rooms] Error saving room:', error);
     res.status(500).json({ error: 'Failed to save room' });
   }
 });
@@ -266,7 +334,7 @@ app.post('/api/v2/rooms/:roomId', (req, res) => {
 // Files API (for room assets)
 // ============================================
 
-// Get file - supports multiple path segments
+// Get file - supports multiple path segments (read - no auth required)
 app.get('/api/v2/files/*', (req, res) => {
   try {
     const fullPath = req.params[0];
@@ -280,13 +348,13 @@ app.get('/api/v2/files/*', (req, res) => {
     res.setHeader('Content-Type', 'application/octet-stream');
     res.send(Buffer.from(row.data));
   } catch (error) {
-    console.error('Error getting file:', error);
+    console.error('[files] Error getting file:', error);
     res.status(500).json({ error: 'Failed to get file' });
   }
 });
 
-// Save file - supports multiple path segments
-app.post('/api/v2/files/*', (req, res) => {
+// Save file - supports multiple path segments (write - auth required)
+app.post('/api/v2/files/*', requireApiKey, (req, res) => {
   try {
     const fullPath = req.params[0];
     const data = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body);
@@ -300,14 +368,15 @@ app.post('/api/v2/files/*', (req, res) => {
     
     res.json({ success: true, id: fullPath });
   } catch (error) {
-    console.error('Error saving file:', error);
+    console.error('[files] Error saving file:', error);
     res.status(500).json({ error: 'Failed to save file' });
   }
 });
 
 // Start server
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Excalidraw storage server listening on port ${PORT}`);
   console.log(`Database: ${dbPath}`);
+  console.log(`Auth: ${API_KEY ? 'API key enabled' : 'disabled (set API_KEY to enable)'}`);
   console.log(`Cleanup: rooms ${ROOM_MAX_AGE_DAYS}d, exports ${EXPORT_MAX_AGE_DAYS}d, drawings ${DRAWING_MAX_AGE_DAYS}d, interval ${CLEANUP_INTERVAL_HOURS}h`);
 });

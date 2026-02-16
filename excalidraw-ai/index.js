@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3004;
@@ -11,8 +13,52 @@ const PORT = process.env.PORT || 3004;
 const AI_PROVIDER = process.env.AI_PROVIDER || 'openai'; // openai, anthropic, ollama
 const RATE_LIMIT_PER_DAY = parseInt(process.env.AI_RATE_LIMIT_PER_DAY || '100', 10);
 
-// Simple in-memory rate limiting (resets on restart)
-const rateLimits = new Map();
+// API key authentication (optional - set API_KEY env var to enable) [H2]
+const API_KEY = process.env.API_KEY || '';
+
+// ============================================
+// Persistent rate limiting (survives restarts) [M2]
+// ============================================
+
+const RATE_LIMIT_DB_PATH = process.env.RATE_LIMIT_DB_PATH || path.join(__dirname, 'data', 'ratelimits.json');
+
+// Ensure data directory exists
+const dataDir = path.dirname(RATE_LIMIT_DB_PATH);
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+// Load rate limits from disk
+let rateLimits = new Map();
+try {
+  if (fs.existsSync(RATE_LIMIT_DB_PATH)) {
+    const data = JSON.parse(fs.readFileSync(RATE_LIMIT_DB_PATH, 'utf8'));
+    rateLimits = new Map(Object.entries(data));
+  }
+} catch (err) {
+  console.warn('[ratelimit] Failed to load persisted rate limits, starting fresh:', err.message);
+}
+
+// Persist rate limits to disk periodically
+const persistRateLimits = () => {
+  try {
+    const obj = Object.fromEntries(rateLimits);
+    fs.writeFileSync(RATE_LIMIT_DB_PATH, JSON.stringify(obj), 'utf8');
+  } catch (err) {
+    console.error('[ratelimit] Failed to persist rate limits:', err.message);
+  }
+};
+
+// Clean stale entries (older than today) and persist every 5 minutes
+const rateLimitPersistInterval = setInterval(() => {
+  const today = new Date().toDateString();
+  for (const [key] of rateLimits) {
+    if (!key.endsWith(`:${today}`)) {
+      rateLimits.delete(key);
+    }
+  }
+  persistRateLimits();
+}, 5 * 60 * 1000);
 
 const getRateLimitKey = (req) => {
   return req.ip || req.headers['x-forwarded-for'] || 'anonymous';
@@ -121,7 +167,7 @@ const generateMermaidOpenAI = async (prompt) => {
 
 const generateMermaidAnthropic = async (prompt) => {
   const response = await anthropic.messages.create({
-    model: process.env.ANTHROPIC_MODEL || 'claude-3-haiku-20240307',
+    model: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-20241022',
     max_tokens: 2000,
     system: TEXT_TO_DIAGRAM_PROMPT,
     messages: [{ role: 'user', content: prompt }]
@@ -185,7 +231,7 @@ const generateHTMLAnthropic = async (image, texts, theme) => {
   const [, mediaType, base64Data] = matches;
   
   const response = await anthropic.messages.create({
-    model: process.env.ANTHROPIC_VISION_MODEL || 'claude-3-5-sonnet-20241022',
+    model: process.env.ANTHROPIC_VISION_MODEL || 'claude-sonnet-4-20250514',
     max_tokens: 4000,
     messages: [{
       role: 'user',
@@ -317,18 +363,47 @@ const cleanHTMLOutput = (output) => {
 // Middleware
 // ============================================
 
+// Request logging [L4]
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`[http] ${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`);
+  });
+  next();
+});
+
 app.use(cors({
   origin: process.env.CORS_ORIGIN || true, // true = reflect request origin (required for credentials)
   credentials: true, // Allow cookies/auth headers
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'CF-Access-Client-Id', 'CF-Access-Client-Secret'],
+  allowedHeaders: ['Content-Type', 'CF-Access-Client-Id', 'CF-Access-Client-Secret', 'X-API-Key'],
   exposedHeaders: ['X-Ratelimit-Limit', 'X-Ratelimit-Remaining']
 }));
 
 app.use(express.json({ limit: '50mb' }));
 
+// API key authentication middleware [H2]
+// Requests from the Excalidraw frontend pass through Cloudflare Access
+// (which sets Cf-Access-Jwt-Assertion header), so those are allowed through.
+// The API key is for external/programmatic access protection.
+const requireApiKey = (req, res, next) => {
+  if (!API_KEY) {
+    return next(); // No API key configured, skip auth
+  }
+  // Allow requests that passed through Cloudflare Access (JWT present)
+  if (req.headers['cf-access-jwt-assertion']) {
+    return next();
+  }
+  const provided = req.headers['x-api-key'];
+  if (provided === API_KEY) {
+    return next();
+  }
+  return res.status(401).json({ message: 'Unauthorized: invalid or missing API key' });
+};
+
 // ============================================
-// Health check
+// Health check (no auth required)
 // ============================================
 
 app.get('/', (req, res) => {
@@ -336,6 +411,7 @@ app.get('/', (req, res) => {
     status: 'ok',
     message: 'Excalidraw AI server is running',
     provider: AI_PROVIDER,
+    authEnabled: !!API_KEY,
     rateLimitPerDay: RATE_LIMIT_PER_DAY,
     endpoints: [
       'POST /v1/ai/text-to-diagram/generate',
@@ -348,7 +424,7 @@ app.get('/', (req, res) => {
 // Text-to-Diagram Endpoint
 // ============================================
 
-app.post('/v1/ai/text-to-diagram/generate', async (req, res) => {
+app.post('/v1/ai/text-to-diagram/generate', requireApiKey, async (req, res) => {
   try {
     const { prompt } = req.body;
     
@@ -391,7 +467,7 @@ app.post('/v1/ai/text-to-diagram/generate', async (req, res) => {
 // Diagram-to-Code Endpoint
 // ============================================
 
-app.post('/v1/ai/diagram-to-code/generate', async (req, res) => {
+app.post('/v1/ai/diagram-to-code/generate', requireApiKey, async (req, res) => {
   try {
     const { texts, image, theme } = req.body;
     
@@ -434,6 +510,21 @@ app.post('/v1/ai/diagram-to-code/generate', async (req, res) => {
 });
 
 // ============================================
+// Graceful shutdown [M4]
+// ============================================
+
+const shutdown = (signal) => {
+  console.log(`[shutdown] Received ${signal}, closing gracefully...`);
+  clearInterval(rateLimitPersistInterval);
+  persistRateLimits(); // Save rate limits one final time
+  console.log('[shutdown] Rate limits persisted');
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// ============================================
 // Start Server
 // ============================================
 
@@ -442,7 +533,8 @@ initializeProviders();
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Excalidraw AI server listening on port ${PORT}`);
   console.log(`Provider: ${AI_PROVIDER}`);
-  console.log(`Rate limit: ${RATE_LIMIT_PER_DAY} requests/day`);
+  console.log(`Auth: ${API_KEY ? 'API key enabled' : 'disabled (set API_KEY to enable)'}`);
+  console.log(`Rate limit: ${RATE_LIMIT_PER_DAY} requests/day (persistent)`);
   
   if (!openai && !anthropic && !process.env.OLLAMA_HOST) {
     console.warn('WARNING: No AI provider configured! Set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, or OLLAMA_HOST');

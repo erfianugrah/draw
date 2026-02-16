@@ -147,7 +147,7 @@ Caddy will automatically obtain SSL certificates via Cloudflare DNS-01 challenge
 | `BASE_URL` | Full URL with protocol | *required* | `https://draw.example.com` |
 | `CF_API_TOKEN` | Cloudflare API token for DNS-01 | *required* | `abc123...` |
 | `EMAIL` | Email for Let's Encrypt | *required* | `you@example.com` |
-| `TZ` | Timezone for logs/cleanup | `UTC` | `Europe/Amsterdam` |
+| `TZ` | Timezone for logs/cleanup | `UTC` | `America/New_York` |
 | `ROOM_MAX_AGE_DAYS` | Days to keep collaboration rooms | `30` | `7` |
 | `EXPORT_MAX_AGE_DAYS` | Days to keep shared exports | `30` | `14` |
 | `DRAWING_MAX_AGE_DAYS` | Days to keep saved drawings | `90` | `365` |
@@ -162,8 +162,8 @@ Caddy will automatically obtain SSL certificates via Cloudflare DNS-01 challenge
 | `OPENAI_MODEL` | Model for text-to-diagram | `gpt-4o-mini` | `gpt-4o` |
 | `OPENAI_VISION_MODEL` | Model for wireframe-to-code | `gpt-4o` | `gpt-4o` |
 | `ANTHROPIC_API_KEY` | Anthropic API key | - | `sk-ant-...` |
-| `ANTHROPIC_MODEL` | Model for text-to-diagram | `claude-3-haiku-20240307` | `claude-3-5-sonnet-20241022` |
-| `ANTHROPIC_VISION_MODEL` | Model for wireframe-to-code | `claude-3-5-sonnet-20241022` | `claude-3-5-sonnet-20241022` |
+| `ANTHROPIC_MODEL` | Model for text-to-diagram | `claude-3-5-haiku-20241022` | `claude-sonnet-4-20250514` |
+| `ANTHROPIC_VISION_MODEL` | Model for wireframe-to-code | `claude-sonnet-4-20250514` | `claude-sonnet-4-20250514` |
 | `OLLAMA_HOST` | Ollama server URL | - | `http://host.docker.internal:11434` |
 | `OLLAMA_MODEL` | Model for text-to-diagram | `llama3.2` | `mistral` |
 | `OLLAMA_VISION_MODEL` | Model for wireframe-to-code | `llava` | `llava:34b` |

@@ -3,6 +3,9 @@
 .env.local
 .env.*.local
 
+# Node modules (lock files are committed, modules are not)
+node_modules/
+
 # Docker data (if mounted locally)
 data/
 .docker/

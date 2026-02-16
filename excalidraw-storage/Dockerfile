@@ -6,10 +6,10 @@ RUN apk add --no-cache python3 make g++
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
+COPY package.json package-lock.json ./
 
 # Install dependencies
-RUN npm install --production
+RUN npm ci --production
 
 # Copy source
 COPY index.js ./
@@ -28,6 +28,6 @@ EXPOSE 3003
 VOLUME ["/app/data"]
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget -q -O /dev/null http://localhost:${PORT}/ || exit 1
+    CMD wget -q -O /dev/null http://127.0.0.1:${PORT}/ || exit 1
 
 CMD ["node", "index.js"]

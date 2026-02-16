@@ -13,10 +13,12 @@
         X-Frame-Options "SAMEORIGIN"
         # Prevent MIME type sniffing
         X-Content-Type-Options "nosniff"
-        # XSS protection
-        X-XSS-Protection "1; mode=block"
         # Referrer policy - don't leak URLs with encryption keys
         Referrer-Policy "strict-origin-when-cross-origin"
+        # Content Security Policy
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://{$DOMAIN}; img-src 'self' data: blob:; font-src 'self' data:; frame-src 'self' blob:; worker-src 'self' blob:; child-src 'self' blob:"
+        # Permissions Policy
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
         # Remove server header
         -Server
     }
@@ -29,9 +31,9 @@
         path /api/*
     }
     handle @api_options {
-        header Access-Control-Allow-Origin "{header.Origin}"
+        header Access-Control-Allow-Origin "https://{$DOMAIN}"
         header Access-Control-Allow-Methods "GET, POST, PUT, OPTIONS"
-        header Access-Control-Allow-Headers "Content-Type, CF-Access-Client-Id, CF-Access-Client-Secret"
+        header Access-Control-Allow-Headers "Content-Type, CF-Access-Client-Id, CF-Access-Client-Secret, Cf-Access-Jwt-Assertion, X-API-Key"
         header Access-Control-Allow-Credentials "true"
         header Access-Control-Max-Age "86400"
         respond 204
@@ -40,7 +42,7 @@
     # AI API (text-to-diagram, diagram-to-code)
     handle_path /api/ai/* {
         # Add CORS headers for actual requests (with credentials support)
-        header Access-Control-Allow-Origin "{header.Origin}"
+        header Access-Control-Allow-Origin "https://{$DOMAIN}"
         header Access-Control-Allow-Credentials "true"
         header Access-Control-Expose-Headers "X-Ratelimit-Limit, X-Ratelimit-Remaining"
         reverse_proxy excalidraw-ai:3004
@@ -49,7 +51,7 @@
     # Storage API
     handle_path /api/* {
         # Add CORS headers for actual requests (with credentials support)
-        header Access-Control-Allow-Origin "{header.Origin}"
+        header Access-Control-Allow-Origin "https://{$DOMAIN}"
         header Access-Control-Allow-Credentials "true"
         reverse_proxy excalidraw-storage:3003
     }

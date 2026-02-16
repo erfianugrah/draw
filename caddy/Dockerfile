@@ -16,7 +16,13 @@ WORKDIR /app
 # Clone excalidraw at specific version
 RUN git clone --depth 1 --branch ${EXCALIDRAW_VERSION} https://github.com/excalidraw/excalidraw.git .
 
-# Copy our patches
+# Verify expected files exist before patching (fail fast if structure changed) [L5]
+RUN test -f /app/excalidraw-app/data/firebase.ts && \
+    test -f /app/excalidraw-app/components/ExportToExcalidrawPlus.tsx && \
+    test -f /app/excalidraw-app/index.html || \
+    (echo "ERROR: Excalidraw file structure changed - patches need updating for ${EXCALIDRAW_VERSION}" && exit 1)
+
+# Copy our patches (full file replacements targeting EXCALIDRAW_VERSION)
 # - firebase.ts: Replaces Firebase with self-hosted storage
 # - ExportToExcalidrawPlus.tsx: Local share instead of Excalidraw+
 # - index.html: Removes analytics and external CDN references for privacy
@@ -55,6 +61,23 @@ COPY --from=caddy-builder /usr/bin/caddy /usr/bin/caddy
 # Copy Excalidraw static files
 COPY --from=excalidraw-builder /app/excalidraw-app/build /srv
 
+# Bundle fonts locally and rewrite CDN URLs so no external requests are made.
+# The build bundles most fonts but the Assistant UI font variants are CDN-only.
+RUN mkdir -p /srv/fonts/Assistant && \
+    wget -q -O /srv/fonts/Assistant/Assistant-Regular.woff2 \
+      "https://excalidraw.nyc3.cdn.digitaloceanspaces.com/oss/fonts/Assistant/Assistant-Regular.woff2" && \
+    wget -q -O /srv/fonts/Assistant/Assistant-Medium.woff2 \
+      "https://excalidraw.nyc3.cdn.digitaloceanspaces.com/oss/fonts/Assistant/Assistant-Medium.woff2" && \
+    wget -q -O /srv/fonts/Assistant/Assistant-SemiBold.woff2 \
+      "https://excalidraw.nyc3.cdn.digitaloceanspaces.com/oss/fonts/Assistant/Assistant-SemiBold.woff2" && \
+    wget -q -O /srv/fonts/Assistant/Assistant-Bold.woff2 \
+      "https://excalidraw.nyc3.cdn.digitaloceanspaces.com/oss/fonts/Assistant/Assistant-Bold.woff2" && \
+    find /srv -name '*.html' -o -name '*.css' | xargs sed -i \
+      's|https://excalidraw.nyc3.cdn.digitaloceanspaces.com/oss/||g'
+
 EXPOSE 80 443
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1
 
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]
