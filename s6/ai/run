@@ -1,0 +1,6 @@
+#!/bin/sh
+export PORT="${PORT_AI:-3004}"
+export CORS_ORIGIN="${CORS_ORIGIN:-*}"
+export RATE_LIMIT_DB_PATH=/opt/ai/data/ratelimits.json
+export NODE_ENV=production
+exec node /opt/ai/index.js

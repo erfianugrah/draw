@@ -1,0 +1,6 @@
+#!/bin/sh
+export PORT="${PORT_STORAGE:-3003}"
+export CORS_ORIGIN="${CORS_ORIGIN:-*}"
+export DB_PATH=/opt/storage/data/excalidraw.db
+export NODE_ENV=production
+exec node /opt/storage/index.js

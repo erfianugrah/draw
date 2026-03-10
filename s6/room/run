@@ -1,0 +1,5 @@
+#!/bin/sh
+export PORT="${PORT_ROOM:-3002}"
+export CORS_ORIGIN="${CORS_ORIGIN:-*}"
+export NODE_ENV=production
+exec node /opt/room/dist/index.js

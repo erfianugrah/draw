@@ -1,0 +1,51 @@
+# docker-compose.standalone.yml
+# ==============================
+# Uses the pre-built all-in-one image from Docker Hub.
+# All services (Caddy, Room, Storage, AI) run in a single container.
+#
+# Usage:
+#   cp .env.example .env   # then edit with your values
+#   docker compose -f docker-compose.standalone.yml up -d
+
+services:
+  excalidraw:
+    image: erfianugrah/excalidraw:latest
+    container_name: excalidraw
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Required
+      - DOMAIN=${DOMAIN}
+      - CF_API_TOKEN=${CF_API_TOKEN}
+      - EMAIL=${EMAIL}
+      - TZ=${TZ:-UTC}
+      # Storage cleanup
+      - ROOM_MAX_AGE_DAYS=${ROOM_MAX_AGE_DAYS:-30}
+      - EXPORT_MAX_AGE_DAYS=${EXPORT_MAX_AGE_DAYS:-30}
+      - DRAWING_MAX_AGE_DAYS=${DRAWING_MAX_AGE_DAYS:-90}
+      - CLEANUP_INTERVAL_HOURS=${CLEANUP_INTERVAL_HOURS:-24}
+      # Authentication (optional)
+      - API_KEY=${API_KEY:-}
+      # AI provider: openai, anthropic, or ollama
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_VISION_MODEL=${OPENAI_VISION_MODEL:-gpt-4o}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-3-5-haiku-20241022}
+      - ANTHROPIC_VISION_MODEL=${ANTHROPIC_VISION_MODEL:-claude-sonnet-4-20250514}
+      - OLLAMA_HOST=${OLLAMA_HOST:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - OLLAMA_VISION_MODEL=${OLLAMA_VISION_MODEL:-llava}
+      - AI_RATE_LIMIT_PER_DAY=${AI_RATE_LIMIT_PER_DAY:-100}
+    volumes:
+      - excalidraw-data:/opt/storage/data
+      - ai-data:/opt/ai/data
+      - caddy-data:/data/caddy
+
+volumes:
+  excalidraw-data:
+  ai-data:
+  caddy-data:

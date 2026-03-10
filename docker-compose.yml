@@ -1,3 +1,14 @@
+# docker-compose.yml
+# ==================
+# Multi-container architecture for local development/building.
+# Each service runs in its own container with static IPs.
+#
+# For the pre-built all-in-one image, use docker-compose.standalone.yml instead.
+#
+# Usage:
+#   cp .env.example .env   # then edit with your values
+#   docker compose up -d --build
+
 services:
   caddy:
     build:

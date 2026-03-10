@@ -1,0 +1,85 @@
+{
+    email {$EMAIL}
+}
+
+{$DOMAIN} {
+    tls {
+        dns cloudflare {$CF_API_TOKEN}
+    }
+
+    # Security headers
+    header {
+        # Prevent clickjacking
+        X-Frame-Options "SAMEORIGIN"
+        # Prevent MIME type sniffing
+        X-Content-Type-Options "nosniff"
+        # Referrer policy - don't leak URLs with encryption keys
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Content Security Policy
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://{$DOMAIN}; img-src 'self' data: blob:; font-src 'self' data:; frame-src 'self' blob:; worker-src 'self' blob:; child-src 'self' blob:"
+        # Permissions Policy
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        # Remove server header
+        -Server
+    }
+
+    # Handle CORS preflight (OPTIONS) for API routes
+    @api_options {
+        method OPTIONS
+        path /api/*
+    }
+    handle @api_options {
+        header Access-Control-Allow-Origin "https://{$DOMAIN}"
+        header Access-Control-Allow-Methods "GET, POST, PUT, OPTIONS"
+        header Access-Control-Allow-Headers "Content-Type, CF-Access-Client-Id, CF-Access-Client-Secret, Cf-Access-Jwt-Assertion, X-API-Key"
+        header Access-Control-Allow-Credentials "true"
+        header Access-Control-Max-Age "86400"
+        respond 204
+    }
+
+    # AI API (text-to-diagram, diagram-to-code)
+    handle_path /api/ai/* {
+        header Access-Control-Allow-Origin "https://{$DOMAIN}"
+        header Access-Control-Allow-Credentials "true"
+        header Access-Control-Expose-Headers "X-Ratelimit-Limit, X-Ratelimit-Remaining"
+        reverse_proxy localhost:3004
+    }
+
+    # Storage API
+    handle_path /api/* {
+        header Access-Control-Allow-Origin "https://{$DOMAIN}"
+        header Access-Control-Allow-Credentials "true"
+        reverse_proxy localhost:3003
+    }
+
+    # Socket.io for collaboration (WebSocket + polling)
+    handle /socket.io/* {
+        reverse_proxy localhost:3002
+    }
+
+    # Static files - Excalidraw frontend
+    handle {
+        root * /srv
+
+        # Prevent caching of index.html to ensure service worker updates are detected
+        @html {
+            path / /index.html
+        }
+        header @html Cache-Control "no-cache, no-store, must-revalidate"
+
+        # Prevent caching of service worker files
+        @sw {
+            path /sw.js /workbox-*.js /registerSW.js
+        }
+        header @sw Cache-Control "no-cache, no-store, must-revalidate"
+
+        # Long cache for hashed assets (immutable - filename changes when content changes)
+        @hashedAssets {
+            path /assets/*
+        }
+        header @hashedAssets Cache-Control "public, max-age=31536000, immutable"
+
+        try_files {path} /index.html
+        file_server
+    }
+}

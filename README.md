@@ -12,8 +12,8 @@ A fully self-contained, self-hosted [Excalidraw](https://excalidraw.com) deploym
 - **Auto-cleanup** - Configurable retention policies for rooms, exports, and drawings
 - **Auto-HTTPS** - Caddy handles SSL certificates via Cloudflare DNS-01
 - **Single domain** - Everything runs on one domain, only ports 80/443 exposed
-- **Docker-based** - Easy deployment with Docker Compose (4 containers)
-- **ARM64 compatible** - Works on Raspberry Pi 5 and other ARM devices
+- **Docker-based** - Pre-built all-in-one image or multi-container Docker Compose
+- **ARM64 compatible** - Multi-arch images for amd64 and arm64
 - **No Firebase** - Completely self-hosted, no external dependencies
 - **Privacy-first** - No analytics, no external CDN requests, no tracking
 
@@ -84,18 +84,35 @@ For Cloudflare Tunnel, the containers use static IPs on a dedicated subnet (172.
 
 ## Quick Start
 
-### 1. Clone the repository
+### Option A: Pre-built Image (Recommended)
+
+The fastest way to deploy. Uses the all-in-one image from Docker Hub (`erfianugrah/excalidraw`).
 
 ```bash
 git clone https://github.com/erfianugrah/draw.git
 cd draw
+cp .env.example .env
+# Edit .env with your domain, Cloudflare token, and email
+docker compose -f docker-compose.standalone.yml up -d
 ```
 
-### 2. Configure environment
+The image includes all services (Caddy, collaboration, storage, AI) in a single container.
+
+### Option B: Build Locally (Multi-Container)
+
+Builds everything from source. Use this for development or customization.
 
 ```bash
+git clone https://github.com/erfianugrah/draw.git
+cd draw
 cp .env.example .env
+# Edit .env with your values (including BASE_URL)
+docker compose up -d --build
 ```
+
+First build takes **5-10 minutes** on x86 (longer on ARM devices).
+
+### Configure your environment
 
 Edit `.env` with your values:
 
@@ -106,7 +123,7 @@ CF_API_TOKEN=your_cloudflare_api_token
 EMAIL=your_email@example.com
 ```
 
-### 3. Point DNS to your server
+### Point DNS to your server
 
 Create an A record in Cloudflare:
 - **Type:** A
@@ -114,15 +131,7 @@ Create an A record in Cloudflare:
 - **Content:** Your server's IP address
 - **Proxy status:** DNS only (grey cloud) recommended for WebSocket
 
-### 4. Build and deploy
-
-```bash
-docker compose up -d --build
-```
-
-First build takes **5-10 minutes** on x86 (longer on ARM devices like RPi5).
-
-### 5. Access your instance
+### Access your instance
 
 Visit `https://draw.yourdomain.com`
 
@@ -259,29 +268,53 @@ You can also create diagrams from Mermaid syntax directly:
 
 To run without AI features, simply don't set any API keys. The AI service will start but return errors, and the UI features will show appropriate messages.
 
-## Services
+## Deployment Modes
 
-| Service | Port | Description |
-|---------|------|-------------|
-| `caddy` | 80, 443 (exposed) | Reverse proxy, auto-HTTPS, static file server |
-| `excalidraw-room` | 3002 (internal) | Real-time collaboration (Socket.io) |
-| `excalidraw-storage` | 3003 (internal) | Storage API (SQLite + Express) |
-| `excalidraw-ai` | 3004 (internal) | AI features (text-to-diagram, wireframe-to-code) |
+### All-in-One Image (`docker-compose.standalone.yml`)
+
+A single container runs all services managed by [s6-overlay](https://github.com/just-containers/s6-overlay):
+
+| Component | Internal Port | Role |
+|-----------|--------------|------|
+| Caddy | 80, 443 | Reverse proxy, auto-HTTPS, static files |
+| Room | 3002 | Real-time collaboration (Socket.io) |
+| Storage | 3003 | SQLite storage API |
+| AI | 3004 | AI features (text-to-diagram, wireframe-to-code) |
+
+### Multi-Container (`docker-compose.yml`)
+
+Four separate containers on a dedicated bridge network (172.41.1.0/24):
+
+| Service | Container IP | Port | Role |
+|---------|-------------|------|------|
+| `caddy` | 172.41.1.2 | 80, 443 (exposed) | Reverse proxy, auto-HTTPS, static file server |
+| `excalidraw-room` | 172.41.1.3 | 3002 (internal) | Real-time collaboration (Socket.io) |
+| `excalidraw-storage` | 172.41.1.4 | 3003 (internal) | Storage API (SQLite + Express) |
+| `excalidraw-ai` | 172.41.1.5 | 3004 (internal) | AI features (text-to-diagram, wireframe-to-code) |
 
 ## Data Persistence
 
 Data is stored in Docker volumes:
 
+**All-in-one image:**
+| Volume | Contents |
+|--------|----------|
+| `excalidraw-data` | SQLite database with drawings |
+| `ai-data` | AI rate limit data |
+| `caddy-data` | SSL certificates and Caddy config |
+
+**Multi-container:**
 | Volume | Contents |
 |--------|----------|
 | `excalidraw-data` | SQLite database with drawings |
 | `caddy-data` | SSL certificates |
 | `caddy-config` | Caddy configuration |
+| `ai-data` | AI rate limit data |
 
 ### Backup
 
 ```bash
-# Backup drawings database
+# Backup drawings database (standalone)
 docker run --rm \
   -v draw_excalidraw-data:/data \
   -v $(pwd):/backup \
@@ -296,12 +329,34 @@ docker run --rm \
 
 ## Commands
 
-```bash
-# Start services (uses cached images)
-docker compose up -d
+### All-in-one (standalone)
 
+```bash
+# Start
+docker compose -f docker-compose.standalone.yml up -d
+
+# Stop
+docker compose -f docker-compose.standalone.yml down
+
+# View logs
+docker compose -f docker-compose.standalone.yml logs -f
+
+# Update to latest image
+docker compose -f docker-compose.standalone.yml pull
+docker compose -f docker-compose.standalone.yml up -d
+
+# Remove everything including data
+docker compose -f docker-compose.standalone.yml down -v
+```
+
+### Multi-container (local build)
+
+```bash
 # Build and start (first time or after changes)
 docker compose up -d --build
+
+# Start services (uses cached images)
+docker compose up -d
 
 # Stop services
 docker compose down
@@ -372,27 +427,37 @@ docker compose up -d --build
 
 ```
 draw/
-├── .env.example              # Environment template
+├── .env.example                  # Environment template
 ├── .gitignore
-├── Caddyfile                 # Reverse proxy + static file config
-├── docker-compose.yml        # Service orchestration
+├── Caddyfile                     # Reverse proxy config (multi-container)
+├── Caddyfile.embedded            # Reverse proxy config (all-in-one, localhost)
+├── Dockerfile                    # All-in-one image (s6-overlay)
+├── docker-compose.yml            # Multi-container orchestration
+├── docker-compose.standalone.yml # Pre-built all-in-one image
 ├── README.md
+├── .github/workflows/
+│   └── build-image.yml           # CI/CD: multi-arch Docker image build
+├── s6/                           # s6-overlay service definitions
+│   ├── caddy/run
+│   ├── room/run
+│   ├── storage/run
+│   └── ai/run
 ├── caddy/
-│   └── Dockerfile            # Caddy + Cloudflare + Excalidraw build
+│   └── Dockerfile                # Caddy + Cloudflare + Excalidraw build
 ├── excalidraw-room/
-│   └── Dockerfile            # Collaboration server
+│   └── Dockerfile                # Collaboration server
 ├── excalidraw-storage/
-│   ├── Dockerfile            # Storage API
-│   ├── index.js              # Express + SQLite + auto-cleanup
+│   ├── Dockerfile                # Storage API
+│   ├── index.js                  # Express + SQLite + auto-cleanup
 │   └── package.json
 ├── excalidraw-ai/
-│   ├── Dockerfile            # AI service
-│   ├── index.js              # Express + OpenAI/Anthropic/Ollama
+│   ├── Dockerfile                # AI service
+│   ├── index.js                  # Express + OpenAI/Anthropic/Ollama
 │   └── package.json
 └── patches/
-    ├── firebase.ts           # Replaces Firebase with self-hosted API
-    ├── ExportToExcalidrawPlus.tsx  # Local share instead of Excalidraw+
-    └── index.html            # Removes analytics and external CDN
+    ├── firebase.ts               # Replaces Firebase with self-hosted API
+    ├── ExportToExcalidrawPlus.tsx # Local share instead of Excalidraw+
+    └── index.html                # Removes analytics and external CDN
 ```
 
 ### API Endpoints
