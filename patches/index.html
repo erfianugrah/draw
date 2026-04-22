@@ -71,6 +71,11 @@
       type="text/css"
     />
 
+    <!-- Self-hosted: load all fonts from local /fonts/ instead of CDN -->
+    <script>
+      window.EXCALIDRAW_ASSET_PATH = "/";
+    </script>
+
     <% } else { %>
     <script>
       window.EXCALIDRAW_ASSET_PATH = window.origin;

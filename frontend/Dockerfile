@@ -42,18 +42,29 @@ ARG VITE_APP_BACKEND_V2_POST_URL=
 ARG VITE_APP_AI_BACKEND=
 ARG VITE_APP_DISABLE_TRACKING=true
 
+# Library browser — pass through to upstream (public, not a privacy concern)
+ARG VITE_APP_LIBRARY_URL=https://libraries.excalidraw.com
+ARG VITE_APP_LIBRARY_BACKEND=https://us-central1-excalidraw-room-persistence.cloudfunctions.net/libraries
+
 RUN echo "MODE=production" > .env.production && \
     echo "VITE_APP_WS_SERVER_URL=${VITE_APP_WS_SERVER_URL}" >> .env.production && \
     echo "VITE_APP_BACKEND_V2_GET_URL=${VITE_APP_BACKEND_V2_GET_URL}" >> .env.production && \
     echo "VITE_APP_BACKEND_V2_POST_URL=${VITE_APP_BACKEND_V2_POST_URL}" >> .env.production && \
     echo "VITE_APP_AI_BACKEND=${VITE_APP_AI_BACKEND}" >> .env.production && \
+    echo "VITE_APP_LIBRARY_URL=${VITE_APP_LIBRARY_URL}" >> .env.production && \
+    echo "VITE_APP_LIBRARY_BACKEND=${VITE_APP_LIBRARY_BACKEND}" >> .env.production && \
     echo "VITE_APP_DISABLE_TRACKING=${VITE_APP_DISABLE_TRACKING}" >> .env.production && \
     echo "VITE_APP_ENABLE_TRACKING=false" >> .env.production
 
 RUN yarn build:app:docker
 
-# Bundle fonts locally (node:18 has HTTPS support for wget)
-RUN mkdir -p /app/excalidraw-app/build/fonts/Assistant && \
+# Self-host ALL fonts — prevents any runtime CDN fetches.
+# 1. Copy @excalidraw/excalidraw package fonts (Excalifont, Nunito, ComicShanns, etc.)
+# 2. Download Assistant UI font variants (not in npm package)
+# 3. Rewrite CDN URLs in built HTML/CSS to local paths
+RUN cp -r /app/node_modules/@excalidraw/excalidraw/dist/prod/fonts/* \
+      /app/excalidraw-app/build/fonts/ 2>/dev/null || true && \
+    mkdir -p /app/excalidraw-app/build/fonts/Assistant && \
     wget -q -O /app/excalidraw-app/build/fonts/Assistant/Assistant-Regular.woff2 \
       "https://excalidraw.nyc3.cdn.digitaloceanspaces.com/oss/fonts/Assistant/Assistant-Regular.woff2" && \
     wget -q -O /app/excalidraw-app/build/fonts/Assistant/Assistant-Medium.woff2 \
@@ -62,7 +73,7 @@ RUN mkdir -p /app/excalidraw-app/build/fonts/Assistant && \
       "https://excalidraw.nyc3.cdn.digitaloceanspaces.com/oss/fonts/Assistant/Assistant-SemiBold.woff2" && \
     wget -q -O /app/excalidraw-app/build/fonts/Assistant/Assistant-Bold.woff2 \
       "https://excalidraw.nyc3.cdn.digitaloceanspaces.com/oss/fonts/Assistant/Assistant-Bold.woff2" && \
-    find /app/excalidraw-app/build -name '*.html' -o -name '*.css' | xargs sed -i \
+    find /app/excalidraw-app/build -name '*.html' -o -name '*.css' -o -name '*.js' | xargs sed -i \
       's|https://excalidraw.nyc3.cdn.digitaloceanspaces.com/oss/||g'
 
 # ==============================================================================

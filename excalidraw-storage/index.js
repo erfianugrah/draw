@@ -304,6 +304,10 @@ app.get('/api/v2/rooms/:roomId', (req, res) => {
 });
 
 // Save/update room scene data (write - auth required)
+// Uses atomic sceneVersion check — only accepts writes with a higher version
+// to prevent concurrent clients from overwriting each other's changes.
+// The client-side reconcileElements() merges before sending, so a stale
+// sceneVersion means the client needs to re-fetch and reconcile.
 app.post('/api/v2/rooms/:roomId', requireApiKey, (req, res) => {
   try {
     const { roomId } = req.params;
@@ -312,7 +316,7 @@ app.post('/api/v2/rooms/:roomId', requireApiKey, (req, res) => {
     const ivBuffer = iv ? Buffer.from(iv, 'base64') : null;
     const ciphertextBuffer = ciphertext ? Buffer.from(ciphertext, 'base64') : null;
     
-    const stmt = db.prepare(`
+    const result = db.prepare(`
       INSERT INTO rooms (id, scene_version, iv, ciphertext)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
@@ -320,8 +324,12 @@ app.post('/api/v2/rooms/:roomId', requireApiKey, (req, res) => {
         iv = excluded.iv,
         ciphertext = excluded.ciphertext,
         updated_at = strftime('%s', 'now')
-    `);
-    stmt.run(roomId, sceneVersion, ivBuffer, ciphertextBuffer);
+      WHERE excluded.scene_version > rooms.scene_version
+    `).run(roomId, sceneVersion, ivBuffer, ciphertextBuffer);
+    
+    if (result.changes === 0) {
+      return res.status(409).json({ error: 'Conflict: stale sceneVersion' });
+    }
     
     res.json({ success: true, roomId });
   } catch (error) {

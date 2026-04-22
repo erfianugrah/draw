@@ -110,6 +110,75 @@ export const saveFilesToFirebase = async ({
   return { savedFiles, erroredFiles };
 };
 
+const MAX_SAVE_RETRIES = 3;
+
+const reconcileAndSave = async (
+  roomId: string,
+  roomKey: string,
+  elements: readonly SyncableExcalidrawElement[],
+  appState: AppState,
+): Promise<readonly SyncableExcalidrawElement[]> => {
+  // Fetch existing room data for reconciliation
+  const existingResponse = await fetch(
+    `${STORAGE_API}/api/v2/rooms/${roomId}`,
+    { credentials: "include" },
+  );
+  let reconciledElements = elements;
+
+  if (existingResponse.ok) {
+    const existingData = await existingResponse.json();
+    if (existingData.ciphertext && existingData.iv) {
+      const iv = Uint8Array.from(atob(existingData.iv), (c) =>
+        c.charCodeAt(0),
+      );
+      const ciphertext = Uint8Array.from(atob(existingData.ciphertext), (c) =>
+        c.charCodeAt(0),
+      );
+      const prevElements = getSyncableElements(
+        restoreElements(
+          await decryptElements(iv, ciphertext, roomKey),
+          null,
+        ),
+      );
+      reconciledElements = getSyncableElements(
+        reconcileElements(
+          elements,
+          prevElements as OrderedExcalidrawElement[] as RemoteExcalidrawElement[],
+          appState,
+        ),
+      );
+    }
+  }
+
+  // Encrypt and save
+  const { ciphertext, iv } = await encryptElements(
+    roomKey,
+    reconciledElements,
+  );
+  const sceneVersion = getSceneVersion(reconciledElements);
+
+  const response = await fetch(`${STORAGE_API}/api/v2/rooms/${roomId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sceneVersion,
+      iv: btoa(String.fromCharCode(...iv)),
+      ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
+    }),
+    credentials: "include",
+  });
+
+  if (response.status === 409) {
+    // Server rejected stale sceneVersion — caller should retry
+    throw { retryable: true };
+  }
+  if (!response.ok) {
+    throw new Error("Failed to save room");
+  }
+
+  return reconciledElements;
+};
+
 export const saveToFirebase = async (
   portal: Portal,
   elements: readonly SyncableExcalidrawElement[],
@@ -120,67 +189,26 @@ export const saveToFirebase = async (
     return null;
   }
 
-  try {
-    // Get existing room data
-    const existingResponse = await fetch(
-      `${STORAGE_API}/api/v2/rooms/${roomId}`,
-      { credentials: "include" },
-    );
-    let reconciledElements = elements;
-
-    if (existingResponse.ok) {
-      const existingData = await existingResponse.json();
-      if (existingData.ciphertext && existingData.iv) {
-        const iv = Uint8Array.from(atob(existingData.iv), (c) =>
-          c.charCodeAt(0),
-        );
-        const ciphertext = Uint8Array.from(atob(existingData.ciphertext), (c) =>
-          c.charCodeAt(0),
-        );
-        const prevElements = getSyncableElements(
-          restoreElements(
-            await decryptElements(iv, ciphertext, roomKey),
-            null,
-          ),
-        );
-        reconciledElements = getSyncableElements(
-          reconcileElements(
-            elements,
-            prevElements as OrderedExcalidrawElement[] as RemoteExcalidrawElement[],
-            appState,
-          ),
-        );
+  // Retry loop: on 409 (stale sceneVersion), re-fetch + reconcile + re-save
+  for (let attempt = 0; attempt < MAX_SAVE_RETRIES; attempt++) {
+    try {
+      const reconciledElements = await reconcileAndSave(
+        roomId,
+        roomKey,
+        elements,
+        appState,
+      );
+      SceneVersionCache.set(socket, reconciledElements);
+      return reconciledElements;
+    } catch (error: any) {
+      if (error?.retryable && attempt < MAX_SAVE_RETRIES - 1) {
+        continue;
       }
+      console.error("Error saving to storage:", error);
+      return null;
     }
-
-    // Encrypt and save
-    const { ciphertext, iv } = await encryptElements(
-      roomKey,
-      reconciledElements,
-    );
-    const sceneVersion = getSceneVersion(reconciledElements);
-
-    const response = await fetch(`${STORAGE_API}/api/v2/rooms/${roomId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sceneVersion,
-        iv: btoa(String.fromCharCode(...iv)),
-        ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
-      }),
-      credentials: "include",
-    });
-
-    if (!response.ok) {
-      throw new Error("Failed to save room");
-    }
-
-    SceneVersionCache.set(socket, reconciledElements);
-    return reconciledElements;
-  } catch (error) {
-    console.error("Error saving to storage:", error);
-    return null;
   }
+  return null;
 };
 
 export const loadFromFirebase = async (
