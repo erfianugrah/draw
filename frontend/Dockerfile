@@ -5,7 +5,7 @@ ARG EXCALIDRAW_VERSION=
 # ==============================================================================
 # Build Excalidraw frontend
 # ==============================================================================
-FROM node:18 AS builder
+FROM node:22 AS builder
 
 ARG EXCALIDRAW_VERSION
 
