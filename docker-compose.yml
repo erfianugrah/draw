@@ -1,48 +1,25 @@
 # docker-compose.yml
 # ==================
-# Multi-container architecture for local development/building.
-# Each service runs in its own container with static IPs.
-#
-# For the pre-built all-in-one image, use docker-compose.standalone.yml instead.
+# Headless deployment — no built-in reverse proxy.
+# External Caddy (or any reverse proxy) handles TLS and routing.
+# All services expose ports on the host.
 #
 # Usage:
-#   cp .env.example .env   # then edit with your values
 #   docker compose up -d --build
+#
+# Deployed on Unraid via Composer (ghcr.io/erfianugrah/composer).
 
 services:
-  caddy:
+  frontend:
     build:
       context: .
-      dockerfile: caddy/Dockerfile
-      args:
-        - VITE_APP_WS_SERVER_URL=${BASE_URL}
-        - VITE_APP_BACKEND_V2_GET_URL=${BASE_URL}/api/v2/
-        - VITE_APP_BACKEND_V2_POST_URL=${BASE_URL}/api/v2/post/
-        - VITE_APP_AI_BACKEND=${BASE_URL}/api/ai
-    container_name: excalidraw-caddy
-    expose:
-      - 80
-      - 443
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy-data:/data
-      - caddy-config:/config
-    environment:
-      - DOMAIN=${DOMAIN}
-      - CF_API_TOKEN=${CF_API_TOKEN}
-      - EMAIL=${EMAIL}
-      - TZ=${TZ:-UTC}
+      dockerfile: frontend/Dockerfile
+    container_name: excalidraw-frontend
     restart: unless-stopped
-    depends_on:
-      excalidraw-room:
-        condition: service_healthy
-      excalidraw-storage:
-        condition: service_healthy
-      excalidraw-ai:
-        condition: service_healthy
-    networks:
-      excalidraw:
-        ipv4_address: 172.41.1.2
+    ports:
+      - "3001:80"
+    environment:
+      - TZ=${TZ:-UTC}
 
   excalidraw-room:
     build:
@@ -50,15 +27,12 @@ services:
       dockerfile: Dockerfile
     container_name: excalidraw-collab
     restart: unless-stopped
-    expose:
-      - 3002
+    ports:
+      - "3002:3002"
     environment:
       - PORT=3002
       - CORS_ORIGIN=*
       - TZ=${TZ:-UTC}
-    networks:
-      excalidraw:
-        ipv4_address: 172.41.1.3
 
   excalidraw-storage:
     build:
@@ -66,23 +40,19 @@ services:
       dockerfile: Dockerfile
     container_name: excalidraw-storage
     restart: unless-stopped
-    expose:
-      - 3003
+    ports:
+      - "3003:3003"
     environment:
       - PORT=3003
       - CORS_ORIGIN=*
       - TZ=${TZ:-UTC}
       - API_KEY=${API_KEY:-}
-      # Auto-cleanup settings (in days)
       - ROOM_MAX_AGE_DAYS=${ROOM_MAX_AGE_DAYS:-30}
       - EXPORT_MAX_AGE_DAYS=${EXPORT_MAX_AGE_DAYS:-30}
       - DRAWING_MAX_AGE_DAYS=${DRAWING_MAX_AGE_DAYS:-90}
       - CLEANUP_INTERVAL_HOURS=${CLEANUP_INTERVAL_HOURS:-24}
     volumes:
       - excalidraw-data:/app/data
-    networks:
-      excalidraw:
-        ipv4_address: 172.41.1.4
 
   excalidraw-ai:
     build:
@@ -90,45 +60,27 @@ services:
       dockerfile: Dockerfile
     container_name: excalidraw-ai
     restart: unless-stopped
-    expose:
-      - 3004
+    ports:
+      - "3004:3004"
     environment:
       - PORT=3004
       - CORS_ORIGIN=*
       - TZ=${TZ:-UTC}
       - API_KEY=${API_KEY:-}
-      # AI Provider: openai, anthropic, or ollama
       - AI_PROVIDER=${AI_PROVIDER:-openai}
-      # OpenAI settings
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       - OPENAI_VISION_MODEL=${OPENAI_VISION_MODEL:-gpt-4o}
-      # Anthropic settings
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-3-5-haiku-20241022}
       - ANTHROPIC_VISION_MODEL=${ANTHROPIC_VISION_MODEL:-claude-sonnet-4-20250514}
-      # Ollama settings (for local AI)
       - OLLAMA_HOST=${OLLAMA_HOST:-}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
       - OLLAMA_VISION_MODEL=${OLLAMA_VISION_MODEL:-llava}
-      # Rate limiting
       - AI_RATE_LIMIT_PER_DAY=${AI_RATE_LIMIT_PER_DAY:-100}
     volumes:
       - ai-data:/app/data
-    networks:
-      excalidraw:
-        ipv4_address: 172.41.1.5
 
 volumes:
   excalidraw-data:
-  caddy-data:
-  caddy-config:
   ai-data:
-
-networks:
-  excalidraw:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.41.1.0/24
-          gateway: 172.41.1.1
