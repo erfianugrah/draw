@@ -18,6 +18,8 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:3001:80"
+      # dual-bind: edge caddy on MS-01 reaches via LAN IP (servarr caddy keeps 127.0.0.1 until retired)
+      - "10.0.71.2:3001:80"
     environment:
       - TZ=${TZ:-UTC}
 
@@ -29,6 +31,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:3002:3002"
+      - "10.0.71.2:3002:3002"
     environment:
       - PORT=3002
       - CORS_ORIGIN=*
@@ -42,6 +45,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:3003:3003"
+      - "10.0.71.2:3003:3003"
     environment:
       - PORT=3003
       - CORS_ORIGIN=*
@@ -62,6 +66,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:3004:3004"
+      - "10.0.71.2:3004:3004"
     environment:
       - PORT=3004
       - CORS_ORIGIN=*
